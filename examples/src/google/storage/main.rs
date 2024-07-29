@@ -1,0 +1,63 @@
+use flowgen::google;
+use flowgen::google::storage::v2::{storage_client::StorageClient, ListBucketsRequest};
+use gcp_auth::{CustomServiceAccount, TokenProvider};
+use std::path::PathBuf;
+use tonic::{
+    metadata::MetadataValue,
+    transport::{Certificate, ClientTlsConfig},
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Read required env vars.
+    let project_id =
+        std::env::var("PROJECT_ID").map_err(|_| "PROJECT_ID is required".to_string())?;
+    let gcp_credentials = std::env::var("GCP_CREDENTIALS")
+        .map_err(|_| "GCP_CREDENTIALS are required.".to_string())?;
+
+    // Setup required config for the http client.
+    let pem = tokio::fs::read("/etc/ssl/cert.pem")
+        .await
+        .expect("No cert file found");
+    let cert = Certificate::from_pem(pem);
+    let tls_config = ClientTlsConfig::new().ca_certificate(Certificate::from_pem(cert));
+    let channel = tonic::transport::Channel::from_static(google::storage::ENDPOINT)
+        .tls_config(tls_config)?
+        .connect()
+        .await?;
+
+
+    // Authenticate do GCP Cloud.
+    let credentials_path = PathBuf::from(gcp_credentials);
+    let service_account = CustomServiceAccount::from_file(credentials_path)?;
+    let scopes = &["https://www.googleapis.com/auth/cloud-platform"];
+    let token = service_account.token(scopes).await?;
+
+    // Setup required request headers.
+    let bearer_token = format!("Bearer {:?}", token.as_str());
+    let auth_header: MetadataValue<_> = bearer_token.parse()?;
+    let project_path = format!("projects/{0}", project_id);
+    let x_goog: MetadataValue<_> = format!("project={0}", project_path).parse()?;
+
+    // Setup Storage Client.
+    let mut client = StorageClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
+        req.metadata_mut()
+            .insert("authorization", auth_header.clone());
+        req.metadata_mut()
+            .insert("x-goog-request-params", x_goog.clone());
+        Ok(req)
+    });
+
+
+    // List all buckets in the project.
+    let list_buckets_resp = client
+        .list_buckets(tonic::Request::new(ListBucketsRequest {
+            parent: String::from(project_path),
+            ..Default::default()
+        }))
+        .await?;
+
+    println!("RESPONSE={:?}", list_buckets_resp);
+
+    Ok(())
+}
