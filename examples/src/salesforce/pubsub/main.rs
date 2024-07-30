@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sfdc_credentials = env!("SALESFORCE_CREDENTIALS");
     let sfdc_instance_url = env!("SALESFORCE_INSTANCE_URL");
     let sfdc_tenant_id = env!("SALESFORCE_TENANT_ID");
-    let sfdc_topic_name = env!("SALESFORCE_TOPIC_NAMe");
+    let sfdc_topic_name = env!("SALESFORCE_TOPIC_NAME");
 
     // Setup required config for the http client.
     let pem = tokio::fs::read("/etc/ssl/cert.pem")
