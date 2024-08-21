@@ -1,0 +1,3 @@
+[submodule "components/salesforce/proto/pubsub"]
+	path = components/salesforce/proto/pubsub
+	url = https://github.com/forcedotcom/pub-sub-api
