@@ -9,6 +9,7 @@ publish.workspace = true
 [lib]
 name = "flowgen_google"
 path = "src/lib.rs"
+doctest = false
 
 [dependencies]
 prost = "0.12.3"

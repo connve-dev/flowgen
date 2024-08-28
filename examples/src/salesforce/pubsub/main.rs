@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Connect to Salesforce and get token response.
     let sfdc_client = flowgen_salesforce::auth::Client::new()
-        .with_credentials_path(sfdc_credentials.to_string())
+        .with_credentials_path(sfdc_credentials.to_string().into())
         .build()?;
 
     // Setup required Salesforce PubSub request metadata.
