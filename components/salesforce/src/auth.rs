@@ -8,6 +8,15 @@ use oauth2::{
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::PathBuf;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Cannot open the credentials file")]
+    OpenFile(#[source] std::io::Error, PathBuf),
+    #[error("Cannot parse the credentials file")]
+    ParseCredentials(#[source] serde_json::Error),
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 /// Used to store Salesforce Client credentials.
@@ -38,14 +47,14 @@ impl Client {
     > {
         let auth_client = BasicClient::new(
             ClientId::new(self.client_id.clone()),
-            Some(ClientSecret::new(self.client_secret.clone())),
+            Some(ClientSecret::new(self.client_secret.to_owned())),
             AuthUrl::new(format!(
                 "{0}/services/oauth2/authorize",
-                self.instance_url.clone()
+                self.instance_url.to_owned()
             ))?,
             Some(TokenUrl::new(format!(
                 "{0}/services/oauth2/token",
-                self.instance_url.clone()
+                self.instance_url.to_owned()
             ))?),
         );
 
@@ -61,21 +70,46 @@ impl Client {
 #[derive(Default)]
 /// Used to store Salesforce Client configuration.
 pub struct ClientBuilder {
-    credentials_path: String,
+    credentials_path: PathBuf,
 }
 
 impl ClientBuilder {
     /// Pass path to the fail so that credentials can be loaded.
-    pub fn with_credentials_path(&mut self, credentials_path: String) -> &mut Self {
+    pub fn with_credentials_path(&mut self, credentials_path: PathBuf) -> &mut Self {
         self.credentials_path = credentials_path;
         self
     }
 
     /// Generates a new client or return error in case
     /// provided credentials path is not valid.
-    pub fn build(&mut self) -> Result<Client, Box<dyn std::error::Error>> {
-        let creds = fs::read_to_string(&self.credentials_path)?;
-        let client: Client = serde_json::from_str(&creds)?;
+    pub fn build(&mut self) -> Result<Client, Error> {
+        let creds = fs::read_to_string(&self.credentials_path)
+            .map_err(|e| Error::OpenFile(e, self.credentials_path.clone()))?;
+        let client: Client = serde_json::from_str(&creds).map_err(Error::ParseCredentials)?;
         Ok(client)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn test_build_without_credentials() {
+        let client = Client::new().build();
+        assert!(matches!(client, Err(Error::OpenFile(..))));
+    }
+
+    #[test]
+    fn test_build_with_invalid_credentials() {
+        let creds: &str = r#"[{"client_id":"client_id"}]"#;
+        let mut path = PathBuf::new();
+        path.push("credentials.json");
+        let _ = fs::write(path.clone(), creds);
+        let client = Client::new().with_credentials_path(path.clone()).build();
+        assert!(matches!(client, Err(Error::ParseCredentials(..))));
     }
 }
