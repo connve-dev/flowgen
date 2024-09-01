@@ -127,7 +127,7 @@ impl ClientBuilder {
 #[cfg(test)]
 mod tests {
 
-    use std::path::PathBuf;
+    use std::{path::PathBuf, sync::atomic::AtomicUsize};
 
     use super::*;
 
@@ -141,11 +141,12 @@ mod tests {
     fn test_build_with_invalid_credentials() {
         let creds: &str = r#"{"client_id":"client_id"}"#;
         let mut path = PathBuf::new();
-        path.push("credentials.json");
+        path.push("invalid_credentials.json");
         let _ = fs::write(path.clone(), creds);
         let client = ClientBuilder::new()
             .with_credentials_path(path.clone())
             .build();
+        let _ = fs::remove_file(path);
         assert!(matches!(client, Err(Error::ParseCredentials(..))));
     }
 
@@ -155,7 +156,7 @@ mod tests {
             {
                 "client_id": "some_client_id",
                 "client_secret": "some_client_secret", 
-                "instance_url": "some_instance_url", 
+                "instance_url": "https://mydomain.salesforce.com", 
                 "tenant_id": "some_tenant_id"
             }"#;
         let mut path = PathBuf::new();
@@ -164,6 +165,7 @@ mod tests {
         let client = ClientBuilder::new()
             .with_credentials_path(path.clone())
             .build();
+        let _ = fs::remove_file(path);
         assert!(client.is_ok());
     }
 }
