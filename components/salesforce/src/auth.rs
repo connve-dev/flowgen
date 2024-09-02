@@ -1,10 +1,12 @@
 /// This Source Code Form is subject to the terms of the Mozilla Public
 /// License, v. 2.0. If a copy of the MPL was not distributed with this
 /// file, You can obtain one at https://mozilla.org/MPL/2.0/.
-use oauth2::basic::{BasicClient, BasicTokenType};
+use oauth2::basic::{BasicClient, BasicErrorResponseType, BasicTokenType};
 use oauth2::reqwest::async_http_client;
 use oauth2::{
-    AuthUrl, ClientId, ClientSecret, EmptyExtraTokenFields, StandardTokenResponse, TokenUrl,
+    AuthUrl, ClientId, ClientSecret, EmptyExtraTokenFields, RevocationErrorResponseType,
+    StandardErrorResponse, StandardRevocableToken, StandardTokenIntrospectionResponse,
+    StandardTokenResponse, TokenUrl,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -12,19 +14,44 @@ use std::path::PathBuf;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Cannot open the credentials file")]
+    #[error("Cannot open/read the credentials file at path {1}")]
     OpenFile(#[source] std::io::Error, PathBuf),
     #[error("Cannot parse the credentials file")]
     ParseCredentials(#[source] serde_json::Error),
+    #[error("Cannot parse url")]
+    ParseUrl(#[source] url::ParseError),
+    #[error("Other Auth error")]
+    NotCategorized(#[source] Box<dyn std::error::Error>),
+}
+/// Used to store Salesforce Client credentials.
+#[derive(Serialize, Deserialize)]
+struct Credentials {
+    /// Client ID from connected apps.
+    client_id: String,
+    /// Client Secret from connected apps.
+    client_secret: String,
+    /// Intance URL eg. httsp://mydomain.salesforce.com.
+    instance_url: String,
+    /// Tenant/org id from company info.
+    tenant_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 /// Used to store Salesforce Client credentials.
+#[allow(clippy::type_complexity)]
 pub struct Client {
-    /// Client ID from connected apps.
-    pub client_id: String,
-    /// Client Secret from connected apps.
-    pub client_secret: String,
+    /// Oauth2.0 client for getting the tokens.
+    oauth2_client: oauth2::Client<
+        StandardErrorResponse<BasicErrorResponseType>,
+        StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
+        BasicTokenType,
+        StandardTokenIntrospectionResponse<EmptyExtraTokenFields, BasicTokenType>,
+        StandardRevocableToken,
+        StandardErrorResponse<RevocationErrorResponseType>,
+    >,
+
+    /// Token result as a composite of access_token / refresh__token etc.
+    pub token_result: Option<oauth2::StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>>,
     /// Intance URL eg. httsp://mydomain.salesforce.com.
     pub instance_url: String,
     /// Tenant/org id from company info.
@@ -32,38 +59,18 @@ pub struct Client {
 }
 
 impl Client {
-    #[allow(clippy::new_ret_no_self)]
-    /// Creates a new instance of a ClientBuilder.
-    pub fn new() -> ClientBuilder {
-        ClientBuilder::default()
-    }
     /// Authorizes to Salesforce based on provided credentials.
     /// It then exchanges them for auth_token and refresh_token or returns error.
-    pub async fn connect(
-        &self,
-    ) -> Result<
-        StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
-        Box<dyn std::error::Error>,
-    > {
-        let auth_client = BasicClient::new(
-            ClientId::new(self.client_id.clone()),
-            Some(ClientSecret::new(self.client_secret.to_owned())),
-            AuthUrl::new(format!(
-                "{0}/services/oauth2/authorize",
-                self.instance_url.to_owned()
-            ))?,
-            Some(TokenUrl::new(format!(
-                "{0}/services/oauth2/token",
-                self.instance_url.to_owned()
-            ))?),
-        );
-
-        let token_result = auth_client
+    pub async fn connect(mut self) -> Result<Client, Error> {
+        let token_result = self
+            .oauth2_client
             .exchange_client_credentials()
             .request_async(async_http_client)
-            .await?;
+            .await
+            .map_err(|e| Error::NotCategorized(Box::new(e)))?;
 
-        Ok(token_result)
+        self.token_result = Some(token_result);
+        Ok(self)
     }
 }
 
@@ -74,8 +81,13 @@ pub struct ClientBuilder {
 }
 
 impl ClientBuilder {
+    #[allow(clippy::new_ret_no_self)]
+    /// Creates a new instance of a ClientBuilder.
+    pub fn new() -> ClientBuilder {
+        ClientBuilder::default()
+    }
     /// Pass path to the fail so that credentials can be loaded.
-    pub fn with_credentials_path(&mut self, credentials_path: PathBuf) -> &mut Self {
+    pub fn with_credentials_path(&mut self, credentials_path: PathBuf) -> &mut ClientBuilder {
         self.credentials_path = credentials_path;
         self
     }
@@ -83,10 +95,32 @@ impl ClientBuilder {
     /// Generates a new client or return error in case
     /// provided credentials path is not valid.
     pub fn build(&mut self) -> Result<Client, Error> {
-        let creds = fs::read_to_string(&self.credentials_path)
-            .map_err(|e| Error::OpenFile(e, self.credentials_path.clone()))?;
-        let client: Client = serde_json::from_str(&creds).map_err(Error::ParseCredentials)?;
-        Ok(client)
+        let credentials_string = fs::read_to_string(&self.credentials_path)
+            .map_err(|e| Error::OpenFile(e, self.credentials_path.to_owned()))?;
+        let credentials: Credentials =
+            serde_json::from_str(&credentials_string).map_err(Error::ParseCredentials)?;
+        let oauth2_client = BasicClient::new(
+            ClientId::new(credentials.client_id.clone()),
+            Some(ClientSecret::new(credentials.client_secret.to_owned())),
+            AuthUrl::new(format!(
+                "{0}/services/oauth2/authorize",
+                credentials.instance_url.to_owned()
+            ))
+            .map_err(Error::ParseUrl)?,
+            Some(
+                TokenUrl::new(format!(
+                    "{0}/services/oauth2/token",
+                    credentials.instance_url.to_owned()
+                ))
+                .map_err(Error::ParseUrl)?,
+            ),
+        );
+        Ok(Client {
+            oauth2_client,
+            token_result: None,
+            tenant_id: credentials.tenant_id,
+            instance_url: credentials.instance_url,
+        })
     }
 }
 
@@ -99,17 +133,58 @@ mod tests {
 
     #[test]
     fn test_build_without_credentials() {
-        let client = Client::new().build();
+        let client = ClientBuilder::new().build();
         assert!(matches!(client, Err(Error::OpenFile(..))));
     }
 
     #[test]
     fn test_build_with_invalid_credentials() {
-        let creds: &str = r#"[{"client_id":"client_id"}]"#;
+        let creds: &str = r#"{"client_id":"client_id"}"#;
+        let mut path = PathBuf::new();
+        path.push("invalid_credentials.json");
+        let _ = fs::write(path.clone(), creds);
+        let client = ClientBuilder::new()
+            .with_credentials_path(path.clone())
+            .build();
+        let _ = fs::remove_file(path);
+        assert!(matches!(client, Err(Error::ParseCredentials(..))));
+    }
+
+    #[test]
+    fn test_build_with_invalid_url() {
+        let creds: &str = r#"
+            {
+                "client_id": "some_client_id",
+                "client_secret": "some_client_secret", 
+                "instance_url": "mydomain.salesforce.com", 
+                "tenant_id": "some_tenant_id"
+            }"#;
+        let mut path = PathBuf::new();
+        path.push("invalid_url_credentials.json");
+        let _ = fs::write(path.clone(), creds);
+        let client = ClientBuilder::new()
+            .with_credentials_path(path.clone())
+            .build();
+        let _ = fs::remove_file(path);
+        assert!(matches!(client, Err(Error::ParseUrl(..))));
+    }
+
+    #[test]
+    fn test_build_with_valid_credentials() {
+        let creds: &str = r#"
+            {
+                "client_id": "some_client_id",
+                "client_secret": "some_client_secret", 
+                "instance_url": "https://mydomain.salesforce.com", 
+                "tenant_id": "some_tenant_id"
+            }"#;
         let mut path = PathBuf::new();
         path.push("credentials.json");
         let _ = fs::write(path.clone(), creds);
-        let client = Client::new().with_credentials_path(path.clone()).build();
-        assert!(matches!(client, Err(Error::ParseCredentials(..))));
+        let client = ClientBuilder::new()
+            .with_credentials_path(path.clone())
+            .build();
+        let _ = fs::remove_file(path);
+        assert!(client.is_ok());
     }
 }

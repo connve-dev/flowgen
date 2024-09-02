@@ -1,18 +1,18 @@
 use flowgen_google::storage::v2::{storage_client::StorageClient, ListBucketsRequest};
 use gcp_auth::{CustomServiceAccount, TokenProvider};
+use std::env;
 use std::path::PathBuf;
 use tonic::{metadata::AsciiMetadataValue, Request};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Read required env vars.
-    let project_id =
-        std::env::var("PROJECT_ID").map_err(|_| "PROJECT_ID is required".to_string())?;
-    let gcp_credentials = std::env::var("GCP_CREDENTIALS")
-        .map_err(|_| "GCP_CREDENTIALS are required.".to_string())?;
+    let project_id = env::var("PROJECT_ID").map_err(|_| "PROJECT_ID is required".to_string())?;
+    let gcp_credentials =
+        env::var("GCP_CREDENTIALS").map_err(|_| "GCP_CREDENTIALS are required.".to_string())?;
 
     // Setup Flowgen client.
-    let flowgen_client = flowgen::core::Client::new()
+    let flowgen = flowgen::core::ServiceBuilder::new()
         .with_endpoint(format!("{0}:443", flowgen_google::storage::ENDPOINT))
         .build()?
         .connect()
@@ -31,13 +31,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let x_goog: AsciiMetadataValue = format!("project={0}", project_path).parse()?;
 
     // Setup Storage Client.
-    let mut client = StorageClient::with_interceptor(flowgen_client, move |mut req: Request<()>| {
-        req.metadata_mut()
-            .insert("authorization", auth_header.clone());
-        req.metadata_mut()
-            .insert("x-goog-request-params", x_goog.clone());
-        Ok(req)
-    });
+    let mut client = StorageClient::with_interceptor(
+        flowgen.channel.to_owned().unwrap(),
+        move |mut req: Request<()>| {
+            req.metadata_mut()
+                .insert("authorization", auth_header.clone());
+            req.metadata_mut()
+                .insert("x-goog-request-params", x_goog.clone());
+            Ok(req)
+        },
+    );
 
     // List all buckets in the project.
     let list_buckets_resp = client
