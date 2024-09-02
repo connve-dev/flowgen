@@ -83,18 +83,18 @@ pub struct ClientBuilder {
 impl ClientBuilder {
     #[allow(clippy::new_ret_no_self)]
     /// Creates a new instance of a ClientBuilder.
-    pub fn new() -> Self {
+    pub fn new() -> ClientBuilder {
         ClientBuilder::default()
     }
     /// Pass path to the fail so that credentials can be loaded.
-    pub fn with_credentials_path(&mut self, credentials_path: PathBuf) -> &mut Self {
+    pub fn with_credentials_path(&mut self, credentials_path: PathBuf) -> &mut ClientBuilder {
         self.credentials_path = credentials_path;
         self
     }
 
     /// Generates a new client or return error in case
     /// provided credentials path is not valid.
-    pub fn build(&mut self) -> Result<Client, Error> {
+    pub fn build(&self) -> Result<Client, Error> {
         let credentials_string = fs::read_to_string(&self.credentials_path)
             .map_err(|e| Error::OpenFile(e, self.credentials_path.clone()))?;
         let credentials: Credentials =

@@ -104,13 +104,13 @@ impl ContextBuilder {
         }
     }
     /// Pass the Salesforce OAuth client.
-    pub fn with_client(&mut self, client: auth::Client) -> &mut Self {
+    pub fn with_client(&mut self, client: auth::Client) -> &mut ContextBuilder {
         self.client = Some(client);
         self
     }
 
     /// Generates a new PubSub Context that allow for interacting with Salesforce PubSub API..
-    pub fn build(&mut self) -> Result<Context, Error> {
+    pub fn build(&self) -> Result<Context, Error> {
         let client = self.client.as_ref().ok_or_else(Error::ClientMissing)?;
 
         let auth_header: tonic::metadata::AsciiMetadataValue = client
