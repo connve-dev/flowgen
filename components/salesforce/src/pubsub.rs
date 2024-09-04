@@ -132,12 +132,12 @@ impl Context {
 /// Used to store configure PubSub Context.
 pub struct ContextBuilder {
     client: Option<auth::Client>,
-    service: flowgen::core::Service,
+    service: flowgen::service::Client,
 }
 
 impl ContextBuilder {
     // Creates a new instance of ContectBuilder.
-    pub fn new(service: flowgen::core::Service) -> Self {
+    pub fn new(service: flowgen::service::Client) -> Self {
         ContextBuilder {
             client: None,
             service,
@@ -200,13 +200,13 @@ mod tests {
 
     #[test]
     fn test_build_missing_client() {
-        let service = flowgen::core::ServiceBuilder::new().build().unwrap();
+        let service = flowgen::service::ClientBuilder::new().build().unwrap();
         let client = ContextBuilder::new(service).build();
         assert!(matches!(client, Err(Error::ClientMissing(..))));
     }
     #[test]
     fn test_build_missing_token() {
-        let service = flowgen::core::ServiceBuilder::new().build().unwrap();
+        let service = flowgen::service::ClientBuilder::new().build().unwrap();
         let creds: &str = r#"
             {
                 "client_id": "some_client_id",

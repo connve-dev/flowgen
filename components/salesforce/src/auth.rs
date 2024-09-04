@@ -58,10 +58,11 @@ pub struct Client {
     pub tenant_id: String,
 }
 
-impl Client {
+impl flowgen::client::Client for Client {
+    type Error = Error;
     /// Authorizes to Salesforce based on provided credentials.
     /// It then exchanges them for auth_token and refresh_token or returns error.
-    pub async fn connect(mut self) -> Result<Self, Error> {
+    async fn connect(mut self) -> Result<Self, Error> {
         let token_result = self
             .oauth2_client
             .exchange_client_credentials()

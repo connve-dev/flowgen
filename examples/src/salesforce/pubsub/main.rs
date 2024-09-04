@@ -1,3 +1,4 @@
+use flowgen::client::Client;
 use flowgen_salesforce::eventbus::v1::{FetchRequest, SchemaRequest, TopicRequest};
 use std::env;
 use tokio::sync::mpsc;
@@ -10,7 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sfdc_topic_name = env::var("SALESFORCE_TOPIC_NAME").unwrap();
 
     // Setup Flowgen client.
-    let flowgen = flowgen::core::ServiceBuilder::new()
+    let flowgen = flowgen::service::ClientBuilder::new()
         .with_endpoint(format!("{0}:443", flowgen_salesforce::eventbus::ENDPOINT))
         .build()?
         .connect()
