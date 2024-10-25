@@ -8,8 +8,8 @@ test-rust-latest:
   script:
     - chmod +x ./scripts/*.sh
     - ./scripts/build.sh
-  rules: 
-      - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  rules:
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
 
 test-rust-nightly:
   stage: test
@@ -18,8 +18,8 @@ test-rust-nightly:
     - chmod +x ./scripts/*.sh
     - ./scripts/build.sh
   allow_failure: true
-  rules: 
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  rules:
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
 
 build-flowgen:
   image: docker
