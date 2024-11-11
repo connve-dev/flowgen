@@ -35,7 +35,7 @@ pub struct Subscriber {
 }
 
 impl Subscriber {
-    pub fn subscribe(&self) -> Result<Vec<JoinHandle<Result<(), Error>>>, Error> {
+    pub fn init(&self) -> Result<Vec<JoinHandle<Result<(), Error>>>, Error> {
         let mut async_task_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
 
         // Subscribe to all topics from the config.

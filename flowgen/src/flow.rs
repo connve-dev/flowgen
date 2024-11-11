@@ -46,7 +46,7 @@ pub struct Flow {
 }
 
 impl Flow {
-    pub async fn run(mut self) -> Result<Self, Error> {
+    pub async fn init(mut self) -> Result<Self, Error> {
         // Setup Flowgen service.
         let flowgen_service = flowgen_core::service::Builder::new()
             .with_endpoint(format!(

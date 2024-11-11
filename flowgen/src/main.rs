@@ -25,7 +25,7 @@ async fn main() {
             error!("{:?}", err);
             process::exit(1);
         })
-        .run()
+        .init()
         .await
         .unwrap_or_else(|err| {
             error!("{:?}", err);
@@ -35,10 +35,11 @@ async fn main() {
     let mut async_task_list: Vec<JoinHandle<Result<(), subscriber::Error>>> = Vec::new();
     if let Some(source) = f.source {
         match source {
-            flow::Source::salesforce_pubsub(subscriber) => {
+            flow::Source::salesforce_pubsub(source_subscriber) => {
+                let mut subscriber_task_list = source_subscriber.init().unwrap();
+                let mut rx = source_subscriber.rx;
+
                 let mut topic_info_list: Vec<TopicInfo> = Vec::new();
-                let mut subscriber_task_list = subscriber.subscribe().unwrap();
-                let mut rx = subscriber.rx;
                 let receiver_task: JoinHandle<Result<(), subscriber::Error>> =
                     tokio::spawn(async move {
                         while let Some(cm) = rx.recv().await {
