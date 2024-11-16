@@ -1,5 +1,5 @@
 [workspace]
-members = ["flowgen"]
+members = ["flowgen", "bin/event-listener", "bin/event-writer"]
 resolver = "2"
 exclude = [".cargo"]
 

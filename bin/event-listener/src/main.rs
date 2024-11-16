@@ -4,7 +4,6 @@ use flowgen_salesforce::pubsub::subscriber;
 use futures::future::TryJoinAll;
 use std::env;
 use std::process;
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::error;
 use tracing::event;

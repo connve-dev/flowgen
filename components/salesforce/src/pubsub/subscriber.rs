@@ -31,7 +31,7 @@ pub struct Subscriber {
     topic_list: Vec<String>,
     pub pubsub: Arc<Mutex<super::context::Context>>,
     pub rx: Receiver<ChannelMessage>,
-    pub tx: Sender<ChannelMessage>,
+    tx: Sender<ChannelMessage>,
 }
 
 impl Subscriber {
