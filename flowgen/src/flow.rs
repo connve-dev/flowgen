@@ -11,26 +11,6 @@ pub enum Error {
     ParseConfig(#[source] toml::de::Error),
     #[error("Cannot setup Flowgen Client")]
     FlowgenService(#[source] flowgen_core::service::Error),
-    // #[error("Cannot auth to Salesforce using provided credentials")]
-    // FlowgenSalesforceAuth(#[source] flowgen_salesforce::client::Error),
-    // #[error("Cannot setup Salesforce PubSub context")]
-    // FlowgenSalesforcePubSub(#[source] flowgen_salesforce::pubsub::context::Error),
-    // #[error("Cannot establish connection with NATS server")]
-    // NatsConnect(#[source] async_nats::ConnectError),
-    // #[error("Cannot create stream with provided config")]
-    // NatsCreateStream(#[source] async_nats::jetstream::context::CreateStreamError),
-    // #[error("Cannot create key value store with provided config")]
-    // NatsCreateKeyValue(#[source] async_nats::jetstream::context::CreateKeyValueError),
-    // #[error("There was an error with putting kv into the store")]
-    // NatsPutKeyValue(#[source] async_nats::jetstream::kv::PutError),
-    // #[error("There was an error with async_nats publish")]
-    // NatsPublish(#[source] async_nats::jetstream::context::PublishError),
-    // #[error("Cannot execute async task")]
-    // TokioJoin(#[source] tokio::task::JoinError),
-    // #[error("There was an error with subscriber")]
-    // Subscriber(#[source] subscriber::Error),
-    // #[error("There was an error with bincode serialization / deserialization")]
-    // Bincode(#[source] Box<bincode::ErrorKind>),
 }
 
 #[allow(non_camel_case_types)]
@@ -38,8 +18,9 @@ pub enum Source {
     salesforce_pubsub(flowgen_salesforce::pubsub::subscriber::Subscriber),
 }
 
+#[allow(non_camel_case_types)]
 pub enum Target {
-    nats_jetstream(flowgen_nats::jetstream::publisher::Publisher),
+    nats_jetstream(flowgen_nats::jetstream::context::Context),
 }
 
 pub struct Flow {
@@ -80,7 +61,7 @@ impl Flow {
         // Setup target publishers.
         match config.flow.target {
             config::Target::nats_jetstream(config) => {
-                let publisher = flowgen_nats::jetstream::publisher::Builder::new(service, config)
+                let publisher = flowgen_nats::jetstream::context::Builder::new(config)
                     .build()
                     .await
                     .unwrap();

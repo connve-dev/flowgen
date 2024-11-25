@@ -1,3 +1,4 @@
+use async_nats::jetstream::context::Publish;
 use flowgen::flow;
 use flowgen_salesforce::pubsub::eventbus::v1::TopicInfo;
 use flowgen_salesforce::pubsub::subscriber;
@@ -8,6 +9,18 @@ use tokio::task::JoinHandle;
 use tracing::error;
 use tracing::event;
 use tracing::Level;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("There was an error deserializing data into binary format.")]
+    Bincode(#[source] bincode::Error),
+    #[error("There was an error deserializing data into binary format.")]
+    Subscriber(#[source] subscriber::Error),
+    #[error("Cannot execute async task")]
+    TokioJoin(#[source] tokio::task::JoinError),
+    #[error("Cannot execute async task")]
+    NatsPublish(#[source] async_nats::jetstream::context::PublishError),
+}
 
 #[tokio::main]
 async fn main() {
@@ -31,18 +44,23 @@ async fn main() {
             process::exit(1);
         });
 
-    let mut async_task_list: Vec<JoinHandle<Result<(), subscriber::Error>>> = Vec::new();
+    run(f).await.unwrap_or_else(|err| {
+        error!("{:?}", err);
+        process::exit(1);
+    });
+}
+
+async fn run(f: flowgen::flow::Flow) -> Result<(), Error> {
     if let Some(source) = f.source {
         match source {
             flow::Source::salesforce_pubsub(source_subscriber) => {
-                let mut subscriber_task_list = source_subscriber.init().unwrap();
+                let subscriber_task_list = source_subscriber.init().unwrap();
                 let mut rx = source_subscriber.rx;
 
                 let mut topic_info_list: Vec<TopicInfo> = Vec::new();
-                let receiver_task: JoinHandle<Result<(), subscriber::Error>> =
-                    tokio::spawn(async move {
-                        while let Some(cm) = rx.recv().await {
-                            match cm {
+                let receiver_task_list: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    while let Some(cm) = rx.recv().await {
+                        match cm {
                         flowgen_salesforce::pubsub::subscriber::ChannelMessage::FetchResponse(
                             fr,
                         ) => {
@@ -57,20 +75,22 @@ async fn main() {
                                         .cloned()
                                         .collect();
 
-                                    // Setup nats subject based on the topic_name.
+                                    // Setup nats subject and payload.
                                     let s = topic[0].topic_name.replace('/', ".").to_lowercase();
                                     let subject = &s[1..];
+                                    let event: Vec<u8> = bincode::serialize(&pe).map_err(Error::Bincode)?;
 
                                     // Publish an event.
-                                    // let event: Vec<u8> = bincode::serialize(&pe).map_err(Error::Bincode)?;
-
-                                    // nats_jetstream
-                                    //     .send_publish(
-                                    //         subject.to_string(),
-                                    //         Publish::build().payload(event.into()),
-                                    //     )
-                                    //     .await
-                                    //     .map_err(Error::NatsPublish)?;
+                                    if let Some(target) = f.target.as_ref(){
+                                         match target {
+                                            flow::Target::nats_jetstream(context) => {
+                                                context.jetstream.send_publish(
+                                            subject.to_string(),
+                                            Publish::build().payload(event.into())).await.map_err(Error::NatsPublish)?;
+                                                }
+                                            }
+                                     }
+                                    
                                 }
                             }
                         }
@@ -83,19 +103,23 @@ async fn main() {
                             topic_info_list.push(t);
                         }
                     }
-                        }
-                        Ok(())
-                    });
-                async_task_list.append(&mut subscriber_task_list);
-                async_task_list.push(receiver_task);
+                    }
+                    Ok(())
+                });
+
+                // Run all subscriber tasks.
+                subscriber_task_list
+                    .into_iter()
+                    .collect::<TryJoinAll<_>>()
+                    .await
+                    .map_err(Error::TokioJoin)?;
+
+                // Run all receiver tasks.
+                let _ = receiver_task_list.await.map_err(Error::TokioJoin)?;
+         
             }
         }
     }
-    // Run all async tasks.
-    async_task_list
-        .into_iter()
-        .collect::<TryJoinAll<_>>()
-        .await
-        .map_err(subscriber::Error::TokioJoin)
-        .unwrap();
+
+    Ok(())
 }

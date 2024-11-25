@@ -18,8 +18,6 @@ pub enum Error {
     FlowgenSalesforceAuth(#[source] crate::client::Error),
     #[error("There was an error with sending ChannelMessage")]
     TokioSendChannelMessage(#[source] tokio::sync::mpsc::error::SendError<ChannelMessage>),
-    #[error("Cannot execute async task")]
-    TokioJoin(#[source] tokio::task::JoinError),
 }
 pub enum ChannelMessage {
     FetchResponse(FetchResponse),

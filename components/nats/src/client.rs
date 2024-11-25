@@ -19,7 +19,7 @@ pub enum Error {
 #[derive(serde::Deserialize)]
 struct Credentials {
     /// nKey public key string.
-    nkey: String,
+    nkey: Option<String>,
     /// Instance url.
     host: String,
 }
@@ -73,7 +73,11 @@ impl Builder {
             let credentials: Credentials =
                 serde_json::from_str(&credentials_string).map_err(Error::ParseCredentials)?;
 
-            let nats_connect_opts = async_nats::ConnectOptions::with_nkey(credentials.nkey);
+            let mut nats_connect_opts = async_nats::ConnectOptions::new();
+            if let Some(nkey) = credentials.nkey {
+                nats_connect_opts = async_nats::ConnectOptions::with_nkey(nkey);
+            }
+
             Ok(Client {
                 connect_options: nats_connect_opts,
                 nats_client: None,
