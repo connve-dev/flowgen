@@ -5,6 +5,8 @@ stages:
 test-rust-latest:
   stage: test
   image: rust:latest
+  variables:
+    GIT_STRATEGY: clone
   script:
     - chmod +x ./scripts/*.sh
     - ./scripts/build.sh
@@ -14,6 +16,8 @@ test-rust-latest:
 test-rust-nightly:
   stage: test
   image: rustlang/rust:nightly
+  variables:
+    GIT_STRATEGY: clone
   script:
     - chmod +x ./scripts/*.sh
     - ./scripts/build.sh
@@ -24,6 +28,8 @@ test-rust-nightly:
 build-event-relay:
   image: docker
   stage: build
+  variables:
+    GIT_STRATEGY: clone
   services:
     - docker:dind
   variables:
