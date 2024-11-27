@@ -42,6 +42,11 @@ impl Builder {
         if let Some(nats_client) = client.nats_client {
             let context = async_nats::jetstream::new(nats_client);
 
+            let mut max_age = 86400;
+            if let Some(config_max_age) = self.config.max_age {
+                max_age = config_max_age
+            }
+
             // Create or update stream according to config.
             let stream_config = Config {
                 name: self.config.stream_name.clone(),
@@ -50,7 +55,7 @@ impl Builder {
                 max_messages_per_subject: 1,
                 discard: DiscardPolicy::Old,
                 retention: RetentionPolicy::Limits,
-                max_age: Duration::new(60 * 60 * 24 * 7, 0),
+                max_age: Duration::new(max_age, 0),
                 ..Default::default()
             };
 

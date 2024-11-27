@@ -11,6 +11,10 @@ pub enum Error {
     ParseConfig(#[source] toml::de::Error),
     #[error("Cannot setup Flowgen Client")]
     FlowgenService(#[source] flowgen_core::service::Error),
+    #[error("Failed to setup Salesforce PubSub as flow source.")]
+    FlowgenSalesforcePubSubSubscriberError(#[source] flowgen_salesforce::pubsub::subscriber::Error),
+    #[error("Failed to setup Nats JetStream as flow target.")]
+    FlowgenNatsJetStreamContext(#[source] flowgen_nats::jetstream::context::Error),
 }
 
 #[allow(non_camel_case_types)]
@@ -53,7 +57,7 @@ impl Flow {
                     flowgen_salesforce::pubsub::subscriber::Builder::new(service.clone(), config)
                         .build()
                         .await
-                        .unwrap();
+                        .map_err(Error::FlowgenSalesforcePubSubSubscriberError)?;
                 self.source = Some(Source::salesforce_pubsub(subscriber));
             }
         }
@@ -64,7 +68,7 @@ impl Flow {
                 let publisher = flowgen_nats::jetstream::context::Builder::new(config)
                     .build()
                     .await
-                    .unwrap();
+                    .map_err(Error::FlowgenNatsJetStreamContext)?;
                 self.target = Some(Target::nats_jetstream(publisher));
             }
         }

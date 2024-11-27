@@ -9,15 +9,20 @@ use tracing::error;
 use tracing::event;
 use tracing::Level;
 
+pub const DEFAULT_TOPIC_NAME: &str = "/data/ChangeEvents";
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("There was an error deserializing data into binary format.")]
     Bincode(#[source] bincode::Error),
-    #[error("Cannot execute async task")]
+    #[error("Cannot execute async task.")]
     TokioJoin(#[source] tokio::task::JoinError),
-    #[error("Cannot execute async task")]
+    #[error("Failed to publish message in Nats Jetstream.")]
     NatsPublish(#[source] async_nats::jetstream::context::PublishError),
+    #[error("Failed to setup Salesforce PubSub as flow source.")]
+    FlowgenSalesforcePubSubSubscriberError(#[source] flowgen_salesforce::pubsub::subscriber::Error),
 }
+
 
 #[tokio::main]
 async fn main() {
@@ -52,7 +57,7 @@ async fn run(f: flowgen::flow::Flow) -> Result<(), Error> {
     if let Some(source) = f.source {
         match source {
             flow::Source::salesforce_pubsub(source_subscriber) => {
-                let subscriber_task_list = source_subscriber.init().unwrap();
+                let subscriber_task_list = source_subscriber.init().map_err(Error::FlowgenSalesforcePubSubSubscriberError)?;
                 let mut rx = source_subscriber.rx;
 
                 let mut topic_info_list: Vec<TopicInfo> = Vec::new();
@@ -71,17 +76,33 @@ async fn run(f: flowgen::flow::Flow) -> Result<(), Error> {
                                     event!(name: "event_consumed", Level::INFO, event_id = pe.id);
                                     
                                     // Get the relevant topic from the list.
-                                    let topic: Vec<TopicInfo> = topic_info_list
+                                    let mut topic_list: Vec<TopicInfo> = topic_info_list
                                         .iter()
                                         .filter(|t| t.schema_id == pe.schema_id)
                                         .cloned()
                                         .collect();
 
+
+                                    // Use a default all change events topic if no schema_id is to be found. 
+                                    if topic_list.is_empty() {
+                                         topic_list = topic_info_list
+                                        .iter()
+                                        .filter(|t| t.topic_name == DEFAULT_TOPIC_NAME)
+                                        .cloned()
+                                        .collect();
+                                    }
+
+                                    // Break if default topic was not setup. 
+                                    if topic_list.is_empty() {
+                                        break;
+                                    }
+                                    
                                     // Setup nats subject and payload.
-                                    let s = topic[0].topic_name.replace('/', ".").to_lowercase();
+                                    let s = topic_list[0].topic_name.replace('/', ".").to_lowercase();
                                     let event_name = &s[1..];
-                                    let subject = format!("{en}.{eid}", en = event_name, eid = pe.id);
+                                    let subject = format!("pubsub.{en}.{eid}", en = event_name, eid = pe.id);
                                     let event: Vec<u8> = bincode::serialize(&pe).map_err(Error::Bincode)?;
+
 
                                     // Publish an event.
                                     if let Some(target) = f.target.as_ref()
