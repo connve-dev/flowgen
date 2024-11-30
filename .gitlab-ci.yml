@@ -6,7 +6,6 @@ test-rust-latest:
   stage: test
   image: rust:latest
   variables:
-    GIT_STRATEGY: clone
     GIT_SUBMODULE_STRATEGY: recursive
   script:
     - chmod +x ./scripts/*.sh
@@ -18,7 +17,6 @@ test-rust-nightly:
   stage: test
   image: rustlang/rust:nightly
   variables:
-    GIT_STRATEGY: clone
     GIT_SUBMODULE_STRATEGY: recursive
   script:
     - chmod +x ./scripts/*.sh
