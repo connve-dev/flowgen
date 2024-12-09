@@ -210,7 +210,12 @@ async fn run(f: flowgen::flow::Flow) -> Result<(), Error> {
                     .await
                     .map_err(Error::TokioJoin)?;
             }
-            _ => {}
+            flow::Source::gcp_storage(source) => {
+                let mut subscriber = source.init().unwrap();
+                subscriber.subscribe().await.unwrap();
+
+                let mut rx = subscriber.rx;
+            }
         }
     }
 

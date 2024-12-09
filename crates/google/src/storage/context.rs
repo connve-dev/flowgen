@@ -3,15 +3,15 @@ use crate::client;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Client is missing")]
+    #[error("There was an error with initializing client.")]
     ClientMissing(),
-    #[error("TokenResponse is missing")]
-    TokenResponseMissing(),
-    #[error("Service channel is missing")]
+    #[error("There was an error with initializing service.")]
     ServiceChannelMissing(),
-    #[error("Invalid metadata value")]
+    #[error("There was an error with getting token response.")]
+    TokenResponseMissing(),
+    #[error("There was an error with converting metadata value.")]
     InvalidMetadataValue(#[source] tonic::metadata::errors::InvalidMetadataValue),
-    #[error("There was an error with RPC call")]
+    #[error("There was an error with RPC call.")]
     RPCFailed(#[source] tonic::Status),
 }
 
@@ -54,6 +54,7 @@ impl Context {
             .await
             .map_err(Error::RPCFailed)
     }
+
     pub async fn get_object(
         &mut self,
         request: super::super::storage::v2::GetObjectRequest,
@@ -65,27 +66,27 @@ impl Context {
     }
 }
 
-/// Used to store configure PubSub Context.
+/// Used to store configure GCP Storage Context.
 pub struct Builder {
     client: Option<client::Client>,
     service: flowgen_core::service::Service,
 }
 
 impl Builder {
-    // Creates a new instance of ContectBuilder.
+    /// Creates a new instance of context builder.
     pub fn new(service: flowgen_core::service::Service) -> Self {
         Builder {
             client: None,
             service,
         }
     }
-    /// Pass the Salesforce OAuth client.
+    /// Pass the GCP client.
     pub fn with_client(&mut self, client: client::Client) -> &mut Builder {
         self.client = Some(client);
         self
     }
 
-    /// Generates a new PubSub Context that allow for interacting with Salesforce PubSub API.
+    /// Generates a new GCP Storage context.
     pub fn build(&self) -> Result<Context, Error> {
         let client = self.client.as_ref().ok_or_else(Error::ClientMissing)?;
 

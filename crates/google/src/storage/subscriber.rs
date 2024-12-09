@@ -10,7 +10,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 
-use super::v2::{GetObjectRequest, ReadObjectRequest};
+use super::v2::ReadObjectRequest;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -43,34 +43,24 @@ impl Subscriber {
             let mut stream = context
                 .lock()
                 .await
-                .get_object(GetObjectRequest {
+                .read_object(ReadObjectRequest {
+                    object,
+                    bucket,
                     ..Default::default()
                 })
                 .await
                 .unwrap()
                 .into_inner();
 
-            // let mut stream = context
-            //     .lock()
-            //     .await
-            //     .read_object(ReadObjectRequest {
-            //         object,
-            //         bucket,
-            //         ..Default::default()
-            //     })
-            //     .await
-            //     .unwrap()
-            //     .into_inner();
-
-            // while let Some(received) = stream.next().await {
-            //     match received {
-            //         Ok(resp) => {
-            //             let m: Vec<u8> = bincode::serialize(&resp).unwrap();
-            //             tx.send(m).await.unwrap();
-            //         }
-            //         Err(e) => {}
-            //     }
-            // }
+            while let Some(received) = stream.next().await {
+                match received {
+                    Ok(resp) => {
+                        let m: Vec<u8> = bincode::serialize(&resp).unwrap();
+                        tx.send(m).await.unwrap();
+                    }
+                    Err(e) => {}
+                }
+            }
             Ok(())
         });
 
@@ -99,7 +89,7 @@ pub struct Builder {
 }
 
 impl Builder {
-    /// Creates a new instance of a Builder.
+    /// Creates a new instance of a builder.
     pub fn new(config: super::config::Source, service: flowgen_core::service::Service) -> Builder {
         Builder { config, service }
     }

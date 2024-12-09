@@ -136,20 +136,20 @@ pub struct Builder {
 }
 
 impl Builder {
-    // Creates a new instance of ContectBuilder.
+    // Creates a new instance of builder..
     pub fn new(service: flowgen_core::service::Service) -> Self {
         Builder {
             client: None,
             service,
         }
     }
-    /// Pass the Salesforce OAuth client.
+    /// Pass the Salesforce client.
     pub fn with_client(&mut self, client: client::Client) -> &mut Builder {
         self.client = Some(client);
         self
     }
 
-    /// Generates a new PubSub Context that allow for interacting with Salesforce PubSub API.
+    /// Generates a new PubSub context.
     pub fn build(&self) -> Result<Context, Error> {
         let client = self.client.as_ref().ok_or_else(Error::ClientMissing)?;
 
