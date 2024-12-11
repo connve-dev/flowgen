@@ -12,10 +12,12 @@ use tokio_stream::StreamExt;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("There was an error with PubSub context")]
+    #[error("There was an error with PubSub context.")]
     FlowgenSalesforcePubSub(#[source] super::context::Error),
-    #[error("Cannot auth to Salesforce using provided credentials")]
+    #[error("There was an error with Salesforce authentication.")]
     FlowgenSalesforceAuth(#[source] crate::client::Error),
+    #[error("There was an error executing async task.")]
+    TokioJoin(#[source] tokio::task::JoinError),
     #[error("There was an error with sending ChannelMessage")]
     TokioSendChannelMessage(#[source] tokio::sync::mpsc::error::SendError<ChannelMessage>),
 }
@@ -25,20 +27,47 @@ pub enum ChannelMessage {
 }
 
 pub struct Subscriber {
-    topic_list: Vec<String>,
+    pub async_task_list: Vec<JoinHandle<Result<(), Error>>>,
     pub pubsub: Arc<Mutex<super::context::Context>>,
     pub rx: Receiver<ChannelMessage>,
-    tx: Sender<ChannelMessage>,
+    pub tx: Sender<ChannelMessage>,
 }
 
-impl Subscriber {
-    pub fn init(&self) -> Result<Vec<JoinHandle<Result<(), Error>>>, Error> {
-        let mut async_task_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
+pub struct Builder {
+    service: flowgen_core::service::Service,
+    config: super::config::Source,
+}
 
-        // Subscribe to all topics from the config.
-        for topic in self.topic_list.iter() {
-            let pubsub = Arc::clone(&self.pubsub);
-            let tx = Sender::clone(&self.tx);
+impl Builder {
+    // Creates a new instance of a Builder.
+    pub fn new(service: flowgen_core::service::Service, config: super::config::Source) -> Builder {
+        Builder { service, config }
+    }
+
+    /// Builds a new FlowgenSalesforcePubsub Subscriber.
+    pub async fn build(self) -> Result<Subscriber, Error> {
+        // Connect to Salesforce.
+        let sfdc_client = crate::client::Builder::new()
+            .with_credentials_path(self.config.credentials.into())
+            .build()
+            .map_err(Error::FlowgenSalesforceAuth)?
+            .connect()
+            .await
+            .map_err(Error::FlowgenSalesforceAuth)?;
+
+        // Get PubSub context.
+        let pubsub = super::context::Builder::new(self.service)
+            .with_client(sfdc_client)
+            .build()
+            .map_err(Error::FlowgenSalesforcePubSub)?;
+
+        let mut async_task_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
+        let pubsub = Arc::new(Mutex::new(pubsub));
+        let (tx, rx) = tokio::sync::mpsc::channel(200);
+
+        for topic in self.config.topic_list.iter() {
+            let pubsub: Arc<Mutex<super::context::Context>> = Arc::clone(&pubsub);
+            let tx = tx.clone();
             let topic = topic.clone();
 
             let subscribe_task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
@@ -87,44 +116,11 @@ impl Subscriber {
             async_task_list.push(subscribe_task);
         }
 
-        Ok(async_task_list)
-    }
-}
-
-pub struct Builder {
-    service: flowgen_core::service::Service,
-    config: super::config::Source,
-}
-
-impl Builder {
-    // Creates a new instance of a Builder.
-    pub fn new(service: flowgen_core::service::Service, config: super::config::Source) -> Builder {
-        Builder { service, config }
-    }
-
-    pub async fn build(self) -> Result<Subscriber, Error> {
-        // Connect to Salesforce.
-        let sfdc_client = crate::client::Builder::new()
-            .with_credentials_path(self.config.credentials.into())
-            .build()
-            .map_err(Error::FlowgenSalesforceAuth)?
-            .connect()
-            .await
-            .map_err(Error::FlowgenSalesforceAuth)?;
-
-        // Get PubSub context.
-        let pubsub = super::context::Builder::new(self.service)
-            .with_client(sfdc_client)
-            .build()
-            .map_err(Error::FlowgenSalesforcePubSub)?;
-
-        let pubsub = Arc::new(Mutex::new(pubsub));
-        let (tx, rx) = tokio::sync::mpsc::channel(200);
         let s = Subscriber {
+            async_task_list,
             pubsub,
             rx,
             tx,
-            topic_list: self.config.topic_list,
         };
 
         Ok(s)

@@ -70,11 +70,7 @@ async fn run(f: flowgen::flow::Flow) -> Result<(), Error> {
     if let Some(source) = f.source {
         match source {
             flow::Source::salesforce_pubsub(source) => {
-                let subscriber_task_list = source
-                    .init()
-                    .map_err(Error::FlowgenSalesforcePubSubSubscriberError)?;
                 let mut rx = source.rx;
-
                 let mut topic_info_list: Vec<TopicInfo> = Vec::new();
                 let receiver_task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                     while let Some(cm) = rx.recv().await {
@@ -96,7 +92,6 @@ async fn run(f: flowgen::flow::Flow) -> Result<(), Error> {
                                         .cloned()
                                         .collect();
 
-
                                     // Use a default all change events topic if no schema_id is to be found.
                                     if topic_list.is_empty() {
                                          topic_list = topic_info_list
@@ -116,7 +111,6 @@ async fn run(f: flowgen::flow::Flow) -> Result<(), Error> {
                                     let event_name = &s[1..];
                                     let subject = format!("salesforce.pubsub.in.{en}.{eid}", en = event_name, eid = pe.id);
                                     let event: Vec<u8> = bincode::serialize(&pe).map_err(Error::Bincode)?;
-
 
                                     // Publish an event.
                                     if let Some(target) = f.target.as_ref()
@@ -143,26 +137,21 @@ async fn run(f: flowgen::flow::Flow) -> Result<(), Error> {
                 });
 
                 // Run all subscriber tasks.
-                subscriber_task_list
+                source
+                    .async_task_list
                     .into_iter()
                     .collect::<TryJoinAll<_>>()
                     .await
                     .map_err(Error::TokioJoin)?;
 
-                //Run all receiver tasks.
+                // //Run all receiver tasks.
                 try_join_all(vec![receiver_task])
                     .await
                     .map_err(Error::TokioJoin)?;
             }
             flow::Source::file(source) => {
-                let mut subscriber = source.init().map_err(Error::FlowgenFileSubscriberError)?;
-                subscriber
-                    .subscribe()
-                    .await
-                    .map_err(Error::FlowgenFileSubscriberError)?;
-
-                let mut rx = subscriber.rx;
-                let path = subscriber.path.clone();
+                let mut rx = source.rx;
+                let path = source.path.clone();
 
                 let receiver_task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                     while let Some(m) = rx.recv().await {
@@ -201,20 +190,30 @@ async fn run(f: flowgen::flow::Flow) -> Result<(), Error> {
                                 }
                             }
                         }
+                        event!(name: "file_processed", Level::INFO, "file processed: {}", format!(
+                            "{filename}.{timestamp}",
+                            filename = filename,
+                            timestamp = timestamp
+                        ));
                     }
                     Ok(())
                 });
+
+                // Run all subscriber tasks.
+                source
+                    .async_task_list
+                    .into_iter()
+                    .collect::<TryJoinAll<_>>()
+                    .await
+                    .map_err(Error::TokioJoin)?;
 
                 //Run all receiver tasks.
                 try_join_all(vec![receiver_task])
                     .await
                     .map_err(Error::TokioJoin)?;
             }
-            flow::Source::gcp_storage(source) => {
-                let mut subscriber = source.init().unwrap();
-                subscriber.subscribe().await.unwrap();
-
-                let mut rx = subscriber.rx;
+            _ => {
+                error!("unimplemented")
             }
         }
     }
