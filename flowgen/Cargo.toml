@@ -12,7 +12,8 @@ path = "src/main.rs"
 [dependencies]
 serde_avro_fast = "1.1.2"
 oauth2 = "4.4.2"
-deltalake = { version = "0.21.0", features = ["datafusion"] }
+deltalake = { version = "0.22.3", features = ["datafusion"] }
+deltalake-gcp = "0.6.0"
 flowgen_core = { path = "../crates/core" }
 flowgen_google = { path = "../crates/google" }
 flowgen_salesforce = { path = "../crates/salesforce" }
@@ -39,3 +40,4 @@ futures = "0.3.30"
 chrono = "0.4.38"
 glob = "0.3.1"
 google-cloud-auth = { git = "https://github.com/googleapis/google-cloud-rust" }
+arrow = "53.3.0"

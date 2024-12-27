@@ -3,6 +3,7 @@ use arrow::{
     csv::{reader::Format, ReaderBuilder},
     ipc::writer::StreamWriter,
 };
+use chrono::Utc;
 use std::{fs::File, io::Seek, sync::Arc};
 use tokio::{
     sync::mpsc::{Receiver, Sender},
@@ -18,7 +19,7 @@ pub enum Error {
     #[error("There was an error deserializing data into binary format.")]
     Arrow(#[source] arrow::error::ArrowError),
     #[error("There was an error with sending message over channel.")]
-    TokioSendMessage(#[source] tokio::sync::mpsc::error::SendError<RecordBatch>),
+    TokioSendMessage(#[source] tokio::sync::mpsc::error::SendError<Message>),
 }
 
 pub trait Converter {
@@ -43,8 +44,14 @@ impl Converter for RecordBatch {
 pub struct Subscriber {
     pub async_task_list: Vec<JoinHandle<Result<(), Error>>>,
     pub path: String,
-    pub rx: Receiver<RecordBatch>,
-    pub tx: Sender<RecordBatch>,
+    pub rx: Receiver<Message>,
+    pub tx: Sender<Message>,
+}
+
+#[derive(Debug)]
+pub struct Message {
+    pub record_batch: RecordBatch,
+    pub file_chunk: String,
 }
 
 /// A builder of the file reader.
@@ -66,23 +73,32 @@ impl Builder {
         {
             let tx = tx.clone();
             let subscribe_task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                let mut file = File::open(path).map_err(Error::InputOutput)?;
+                let mut file = File::open(path.clone()).map_err(Error::InputOutput)?;
                 let (schema, _) = Format::default()
+                    .with_header(true)
                     .infer_schema(&mut file, Some(100))
                     .map_err(Error::Arrow)?;
                 file.rewind().map_err(Error::InputOutput)?;
 
-                let mut csv = ReaderBuilder::new(Arc::new(schema.clone()))
+                let csv = ReaderBuilder::new(Arc::new(schema.clone()))
                     .with_header(true)
+                    .with_batch_size(1000)
                     .build(file)
                     .map_err(Error::Arrow)?;
 
-                if let Some(value) = csv.next() {
-                    let record_batch = value.map_err(Error::Arrow)?;
-
-                    tx.send(record_batch)
-                        .await
-                        .map_err(Error::TokioSendMessage)?;
+                for batch in csv {
+                    let record_batch = batch.map_err(Error::Arrow)?;
+                    let timestamp = Utc::now().timestamp_micros();
+                    let filename = match path.split("/").last() {
+                        Some(filename) => filename,
+                        None => break,
+                    };
+                    let file_chunk = format!("{}.{}", filename, timestamp);
+                    let m = Message {
+                        record_batch,
+                        file_chunk,
+                    };
+                    tx.send(m).await.map_err(Error::TokioSendMessage)?;
                 }
                 Ok(())
             });

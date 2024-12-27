@@ -1,6 +1,12 @@
 use super::config;
+use arrow::array::RecordBatch;
+use async_nats::jetstream::context::Publish;
+use chrono::Utc;
 use flowgen_core::client::Client;
-use std::path::PathBuf;
+use flowgen_file::subscriber::Converter;
+use futures::future::TryJoinAll;
+use std::{ops::DerefMut, path::PathBuf, sync::Arc};
+use tokio::sync::{mpsc::Receiver, Mutex};
 use tracing::error;
 
 #[derive(thiserror::Error, Debug)]
@@ -34,9 +40,17 @@ pub enum Target {
 
 pub struct Flow {
     config: config::Config,
+    receiver: Option<Arc<Mutex<Message>>>,
     pub source: Option<Source>,
     pub target: Option<Target>,
 }
+
+#[allow(non_camel_case_types)]
+pub enum Message {
+    file(Receiver<flowgen_file::subscriber::Message>),
+}
+
+#[allow(non_camel_case_types)]
 
 impl Flow {
     pub async fn init(mut self) -> Result<Self, Error> {
@@ -62,7 +76,16 @@ impl Flow {
                     .build()
                     .await
                     .map_err(Error::FlowgenFileSubscriberError)?;
-                self.source = Some(Source::file(subscriber));
+
+                subscriber
+                    .async_task_list
+                    .into_iter()
+                    .collect::<TryJoinAll<_>>()
+                    .await
+                    .unwrap();
+
+                self.receiver = Some(Arc::new(Mutex::new(Message::file(subscriber.rx))));
+                // self.source = Some(Source::file(subscriber));
             }
             config::Source::salesforce_pubsub(config) => {
                 let subscriber =
@@ -80,6 +103,13 @@ impl Flow {
                         .unwrap();
                 self.source = Some(Source::gcp_storage(subscriber));
             }
+            config::Source::nats_jetstream(config) => {
+                let subscriber = flowgen_nats::jetstream::subscriber::Builder::new(config)
+                    .build()
+                    .await
+                    .unwrap();
+                self.source = Some(Source::nats_jetstream(subscriber));
+            }
         }
 
         // Setup target publishers.
@@ -89,6 +119,24 @@ impl Flow {
                     .build()
                     .await
                     .map_err(Error::FlowgenNatsJetStreamPublisher)?;
+
+                if let Some(rx) = self.receiver.clone() {
+                    let mut rx = rx.lock().await;
+                    match rx.deref_mut() {
+                        Message::file(rx) => {
+                            while let Some(m) = rx.recv().await {
+                                let event = m.record_batch.to_bytes().unwrap();
+                                let subject = format!("filedrop.in.{}", m.file_chunk);
+                                publisher
+                                    .jetstream
+                                    .send_publish(subject, Publish::build().payload(event.into()))
+                                    .await
+                                    .unwrap();
+                            }
+                        }
+                    }
+                }
+
                 self.target = Some(Target::nats_jetstream(publisher));
             }
         }
@@ -112,6 +160,7 @@ impl Builder {
         let config: config::Config = serde_json::from_str(&c).map_err(Error::ParseConfig)?;
         let f = Flow {
             config,
+            receiver: None,
             source: None,
             target: None,
         };

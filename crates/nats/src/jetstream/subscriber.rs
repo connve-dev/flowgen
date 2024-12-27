@@ -1,9 +1,11 @@
+use async_nats::client;
 use flowgen_core::client::Client;
 use std::{fs::File, io::Seek, sync::Arc};
 use tokio::{
     sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
 };
+use tokio_stream::StreamExt;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -52,7 +54,23 @@ impl Builder {
             .await
             .map_err(Error::NatsClientAuth)?;
 
-        let jetstream = async_nats::jetstream::new(client.nats_client.unwrap());
+        match client.nats_client {
+            Some(client) => {
+                let tx = tx.clone();
+                let subscribe_task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let mut subscriber = client.subscribe("filedrop.in.>").await.unwrap();
+                    // Receive and process messages
+                    while let Some(message) = subscriber.next().await {
+                        tx.send(message.payload.to_vec())
+                            .await
+                            .map_err(Error::TokioSendMessage);
+                    }
+                    Ok(())
+                });
+                async_task_list.push(subscribe_task);
+            }
+            None => {}
+        }
 
         Ok(Subscriber {
             async_task_list,

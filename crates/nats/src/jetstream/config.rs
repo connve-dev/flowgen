@@ -1,8 +1,6 @@
 #[derive(serde::Deserialize, Clone, Debug)]
 pub struct Source {
     pub credentials: String,
-    pub stream_name: String,
-    pub subjects: Vec<String>,
 }
 
 #[derive(serde::Deserialize, Clone, Debug)]

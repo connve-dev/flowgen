@@ -17,6 +17,7 @@ pub enum Source {
     file(flowgen_file::config::Source),
     salesforce_pubsub(flowgen_salesforce::pubsub::config::Source),
     gcp_storage(flowgen_google::storage::config::Source),
+    nats_jetstream(flowgen_nats::jetstream::config::Source),
 }
 
 #[derive(Deserialize, Clone)]
