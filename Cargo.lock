@@ -1765,9 +1765,8 @@ dependencies = [
  "bincode",
  "bytes",
  "chrono",
- "deltalake",
- "deltalake-gcp",
  "flowgen_core",
+ "flowgen_deltalake",
  "flowgen_file",
  "flowgen_google",
  "flowgen_nats",
@@ -1798,8 +1797,38 @@ name = "flowgen_core"
 version = "0.0.1"
 dependencies = [
  "arrow",
+ "async-nats",
+ "salesforce_pubsub",
  "thiserror 1.0.69",
  "tonic",
+ "url",
+]
+
+[[package]]
+name = "flowgen_deltalake"
+version = "0.0.1"
+dependencies = [
+ "arrow",
+ "async-nats",
+ "bincode",
+ "bytes",
+ "chrono",
+ "deltalake",
+ "deltalake-gcp",
+ "flowgen_core",
+ "futures",
+ "futures-util",
+ "oauth2",
+ "prost 0.12.6",
+ "prost-types",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-build",
  "url",
 ]
 
@@ -1878,12 +1907,14 @@ dependencies = [
 name = "flowgen_salesforce"
 version = "0.0.1"
 dependencies = [
+ "bincode",
  "bytes",
  "flowgen_core",
  "futures-util",
  "oauth2",
  "prost 0.12.6",
  "prost-types",
+ "salesforce_pubsub",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -3439,7 +3470,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "157c5a9d7ea5c2ed2d9fb8f495b64759f7816c7eaea54ba3978f0d63000162e3"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.91",
@@ -3959,6 +3990,26 @@ name = "ryu"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
+
+[[package]]
+name = "salesforce_pubsub"
+version = "0.0.1"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "oauth2",
+ "prost 0.12.6",
+ "prost-types",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-build",
+ "url",
+]
 
 [[package]]
 name = "same-file"
@@ -5524,9 +5575,9 @@ dependencies = [
 
 [[package]]
 name = "zstd-sys"
-version = "2.0.12+zstd.1.5.6"
+version = "2.0.13+zstd.1.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a4e40c320c3cb459d9a9ff6de98cff88f4751ee9275d140e2be94a2b74e4c13"
+checksum = "38ff0f21cfee8f97d94cef41359e0c89aa6113028ab0291aa8ca0038995a95aa"
 dependencies = [
  "cc",
  "pkg-config",

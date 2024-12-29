@@ -4,10 +4,10 @@ use arrow::{
     ipc::writer::StreamWriter,
 };
 use chrono::Utc;
-use flowgen_core::messages::ChannelMessage;
-use serde::{Deserialize, Serialize};
+use flowgen_core::message::ChannelMessage;
+use futures::future::TryJoinAll;
 use std::{fs::File, io::Seek, sync::Arc};
-use tokio::{sync::broadcast::Sender, sync::mpsc::Receiver, task::JoinHandle};
+use tokio::{sync::broadcast::Sender, task::JoinHandle};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -18,15 +18,15 @@ pub enum Error {
     #[error("There was an error deserializing data into binary format.")]
     Arrow(#[source] arrow::error::ArrowError),
     #[error("There was an error with sending message over channel.")]
-    TokioSendMessage(#[source] tokio::sync::mpsc::error::SendError<ChannelMessage>),
+    TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<ChannelMessage>),
 }
 
-pub trait Converter {
+pub trait RecordBatchConverter {
     type Error;
     fn to_bytes(&self) -> Result<Vec<u8>, Self::Error>;
 }
 
-impl Converter for RecordBatch {
+impl RecordBatchConverter for RecordBatch {
     type Error = Error;
     fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         let buffer: Vec<u8> = Vec::new();
@@ -41,10 +41,21 @@ impl Converter for RecordBatch {
 }
 
 pub struct Subscriber {
-    pub async_task_list: Vec<JoinHandle<Result<(), Error>>>,
-    pub path: String,
-    // pub rx: Receiver<Message>,
-    // pub tx: Sender<Message>,
+    handle_list: Vec<JoinHandle<Result<(), Error>>>,
+}
+
+impl Subscriber {
+    pub async fn subscribe(self) -> Result<(), Error> {
+        tokio::spawn(async move {
+            let _ = self
+                .handle_list
+                .into_iter()
+                .collect::<TryJoinAll<_>>()
+                .await
+                .map_err(Error::TokioJoin);
+        });
+        Ok(())
+    }
 }
 
 /// A builder of the file reader.
@@ -63,50 +74,42 @@ impl Builder {
     }
 
     pub async fn build(self) -> Result<Subscriber, Error> {
-        // let (tx, rx) = tokio::sync::broadcast::channel(200);
-        let mut async_task_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
-        let path = self.config.path.clone();
+        let mut handle_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
 
-        {
-            // let tx = self.tx.clone();
-            let subscribe_task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                let mut file = File::open(path.clone()).map_err(Error::InputOutput)?;
-                let (schema, _) = Format::default()
-                    .with_header(true)
-                    .infer_schema(&mut file, Some(100))
-                    .map_err(Error::Arrow)?;
-                file.rewind().map_err(Error::InputOutput)?;
+        let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+            let mut file = File::open(self.config.path.clone()).map_err(Error::InputOutput)?;
+            let (schema, _) = Format::default()
+                .with_header(true)
+                .infer_schema(&mut file, Some(100))
+                .map_err(Error::Arrow)?;
+            file.rewind().map_err(Error::InputOutput)?;
 
-                let csv = ReaderBuilder::new(Arc::new(schema.clone()))
-                    .with_header(true)
-                    .with_batch_size(1000)
-                    .build(file)
-                    .map_err(Error::Arrow)?;
+            let csv = ReaderBuilder::new(Arc::new(schema.clone()))
+                .with_header(true)
+                .with_batch_size(1000)
+                .build(file)
+                .map_err(Error::Arrow)?;
 
-                for batch in csv {
-                    let record_batch = batch.map_err(Error::Arrow)?;
-                    let timestamp = Utc::now().timestamp_micros();
-                    let filename = match path.split("/").last() {
-                        Some(filename) => filename,
-                        None => break,
-                    };
-                    let file_chunk = format!("{}.{}", filename, timestamp);
-                    let m = flowgen_core::messages::FileMessage {
-                        record_batch,
-                        file_chunk,
-                    };
-                    self.tx.send(ChannelMessage::FileMessage(m)).unwrap();
-                }
-                Ok(())
-            });
-            async_task_list.push(subscribe_task);
-        }
+            for batch in csv {
+                let record_batch = batch.map_err(Error::Arrow)?;
+                let timestamp = Utc::now().timestamp_micros();
+                let filename = match self.config.path.split("/").last() {
+                    Some(filename) => filename,
+                    None => break,
+                };
+                let file_chunk = format!("{}.{}", filename, timestamp);
+                let m = flowgen_core::message::FileMessage {
+                    record_batch,
+                    file_chunk,
+                };
+                self.tx
+                    .send(ChannelMessage::file(m))
+                    .map_err(Error::TokioSendMessage)?;
+            }
+            Ok(())
+        });
+        handle_list.push(handle);
 
-        Ok(Subscriber {
-            path: self.config.path,
-            async_task_list,
-            // tx,
-            // rx,
-        })
+        Ok(Subscriber { handle_list })
     }
 }

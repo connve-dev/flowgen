@@ -1,6 +1,7 @@
 #[derive(serde::Deserialize, Clone, Debug)]
 pub struct Source {
     pub credentials: String,
+    pub subject: String,
 }
 
 #[derive(serde::Deserialize, Clone, Debug)]

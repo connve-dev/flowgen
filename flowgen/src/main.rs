@@ -3,17 +3,7 @@ use arrow::ipc::reader::{StreamDecoder, StreamReader};
 use arrow::ipc::RecordBatch;
 use async_nats::jetstream::context::Publish;
 use chrono::Utc;
-use deltalake::arrow::array::{Array, Int32Array, StringArray};
-use deltalake::kernel::{DataType, PrimitiveType, StructField, StructType};
-use deltalake::parquet::basic::ZstdLevel;
-use deltalake::parquet::basic::{Compression, StringType};
-use deltalake::parquet::file::properties::WriterProperties;
-use deltalake::writer::DeltaWriter;
-use deltalake::writer::RecordBatchWriter;
-use deltalake::{DeltaOps, DeltaTableBuilder};
 use flowgen::flow;
-use flowgen_file::subscriber::Converter;
-use flowgen_salesforce::pubsub::eventbus::v1::{ProducerEvent, TopicInfo};
 use futures::future::try_join_all;
 use futures::future::TryJoinAll;
 use glob::glob;
@@ -58,23 +48,19 @@ async fn main() {
             error!("{:?}", err);
             process::exit(1);
         });
-        let f = flowgen::flow::Builder::new(config_path)
+
+        flowgen::flow::Builder::new(config_path)
             .build()
             .unwrap_or_else(|err| {
                 error!("{:?}", err);
                 process::exit(1);
             })
-            .init()
+            .run()
             .await
             .unwrap_or_else(|err| {
                 error!("{:?}", err);
                 process::exit(1);
             });
-
-        // run(f).await.unwrap_or_else(|err| {
-        //     error!("{:?}", err);
-        //     process::exit(1);
-        // })
     }
 }
 

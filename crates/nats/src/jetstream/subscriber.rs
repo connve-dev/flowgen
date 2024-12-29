@@ -1,22 +1,18 @@
-use async_nats::client;
-use flowgen_core::client::Client;
-use std::{fs::File, io::Seek, sync::Arc};
-use tokio::{
-    sync::mpsc::{Receiver, Sender},
-    task::JoinHandle,
-};
+use flowgen_core::{client::Client, message::ChannelMessage};
+use futures_util::future::TryJoinAll;
+use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tokio_stream::StreamExt;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("There was an error authorizating to Nats Client.")]
+    #[error("There was an error authorizating to Nats client.")]
     NatsClientAuth(#[source] crate::client::Error),
-    #[error("There was an error reading/writing/seeking file.")]
-    InputOutput(#[source] std::io::Error),
+    #[error("There was an error subscriging to Nats subject.")]
+    NatsSubscribe(#[source] async_nats::SubscribeError),
     #[error("There was an error executing async task.")]
     TokioJoin(#[source] tokio::task::JoinError),
     #[error("There was an error with sending message over channel.")]
-    TokioSendMessage(#[source] tokio::sync::mpsc::error::SendError<Vec<u8>>),
+    TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<ChannelMessage>),
 }
 
 pub trait Converter {
@@ -25,27 +21,41 @@ pub trait Converter {
 }
 
 pub struct Subscriber {
-    pub async_task_list: Vec<JoinHandle<Result<(), Error>>>,
-    pub rx: Receiver<Vec<u8>>,
-    pub tx: Sender<Vec<u8>>,
+    handle_list: Vec<JoinHandle<Result<(), Error>>>,
+}
+
+impl Subscriber {
+    pub async fn subscribe(self) -> Result<(), Error> {
+        tokio::spawn(async move {
+            let _ = self
+                .handle_list
+                .into_iter()
+                .collect::<TryJoinAll<_>>()
+                .await
+                .map_err(Error::TokioJoin);
+        });
+        Ok(())
+    }
 }
 
 /// A builder of the file reader.
 pub struct Builder {
     config: super::config::Source,
+    tx: Sender<ChannelMessage>,
 }
 
 impl Builder {
     /// Creates a new instance of a Builder.
-    pub fn new(config: super::config::Source) -> Builder {
-        Builder { config }
+    pub fn new(config: super::config::Source, tx: &Sender<ChannelMessage>) -> Builder {
+        Builder {
+            config,
+            tx: tx.clone(),
+        }
     }
 
     pub async fn build(self) -> Result<Subscriber, Error> {
-        let (tx, rx) = tokio::sync::mpsc::channel(200);
-        let mut async_task_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
+        let mut handle_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
 
-        // Connect to Nats Server.
         let client = crate::client::Builder::new()
             .with_credentials_path(self.config.credentials.into())
             .build()
@@ -54,28 +64,22 @@ impl Builder {
             .await
             .map_err(Error::NatsClientAuth)?;
 
-        match client.nats_client {
-            Some(client) => {
-                let tx = tx.clone();
-                let subscribe_task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                    let mut subscriber = client.subscribe("filedrop.in.>").await.unwrap();
-                    // Receive and process messages
-                    while let Some(message) = subscriber.next().await {
-                        tx.send(message.payload.to_vec())
-                            .await
-                            .map_err(Error::TokioSendMessage);
-                    }
-                    Ok(())
-                });
-                async_task_list.push(subscribe_task);
-            }
-            None => {}
+        if let Some(client) = client.nats_client {
+            let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                let mut subscriber = client
+                    .subscribe(self.config.subject)
+                    .await
+                    .map_err(Error::NatsSubscribe)?;
+                while let Some(m) = subscriber.next().await {
+                    self.tx
+                        .send(ChannelMessage::nats_jetstream(m))
+                        .map_err(Error::TokioSendMessage)?;
+                }
+                Ok(())
+            });
+            handle_list.push(handle);
         }
 
-        Ok(Subscriber {
-            async_task_list,
-            tx,
-            rx,
-        })
+        Ok(Subscriber { handle_list })
     }
 }

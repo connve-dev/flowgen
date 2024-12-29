@@ -1,3 +1,3 @@
 pub mod client;
-pub mod messages;
+pub mod message;
 pub mod service;

@@ -29,4 +29,5 @@ pub enum Processor {}
 #[allow(non_camel_case_types)]
 pub enum Target {
     nats_jetstream(flowgen_nats::jetstream::config::Target),
+    deltalake(flowgen_deltalake::config::Target),
 }
