@@ -30,4 +30,5 @@ pub enum Processor {}
 pub enum Target {
     nats_jetstream(flowgen_nats::jetstream::config::Target),
     deltalake(flowgen_deltalake::config::Target),
+    salesforce_pubsub(flowgen_salesforce::pubsub::config::Target),
 }

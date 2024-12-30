@@ -2,8 +2,9 @@ use flowgen_core::{
     client::Client,
     message::{ChannelMessage, SalesforcePubSubMessage},
 };
+
 use futures_util::future::TryJoinAll;
-use salesforce_pubsub::eventbus::v1::{FetchRequest, ProducerEvent, TopicInfo, TopicRequest};
+use salesforce_pubsub::eventbus::v1::{FetchRequest, TopicInfo, TopicRequest};
 use std::sync::Arc;
 use tokio::{
     sync::{broadcast::Sender, Mutex},
@@ -23,19 +24,6 @@ pub enum Error {
     TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<ChannelMessage>),
     #[error("There was an error deserializing data into binary format.")]
     Bincode(#[source] bincode::Error),
-}
-
-pub trait ProducerEventConverter {
-    type Error;
-    fn to_bytes(&self) -> Result<Vec<u8>, Self::Error>;
-}
-
-impl ProducerEventConverter for ProducerEvent {
-    type Error = Error;
-    fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-        let event = bincode::serialize(&self).map_err(Error::Bincode)?;
-        Ok(event)
-    }
 }
 
 pub struct Subscriber {
@@ -146,8 +134,6 @@ impl Builder {
             handle_list.push(handle);
         }
 
-        let s = Subscriber { handle_list };
-
-        Ok(s)
+        Ok(Subscriber { handle_list })
     }
 }
