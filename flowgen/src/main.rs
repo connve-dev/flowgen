@@ -1,9 +1,9 @@
-use futures::future::{join_all, JoinAll};
 use glob::glob;
 use std::env;
 use std::process;
-use tokio::task::JoinHandle;
 use tracing::error;
+use tracing::event;
+use tracing::Level;
 pub const DEFAULT_TOPIC_NAME: &str = "/data/ChangeEvents";
 
 #[derive(thiserror::Error, Debug)]
@@ -30,6 +30,19 @@ async fn main() {
 
     // Run Flowgen service for each of individual configs.
     let mut all_handle_list = Vec::new();
+
+    if let Ok(configs) = glob(&config_dir) {
+        let num_configs = configs.count();
+        if num_configs == 0 {
+            event!(
+                Level::WARN,
+                "{} flow configurations found at path: {}",
+                num_configs,
+                config_dir
+            );
+        }
+    }
+
     for config in glob(&config_dir).unwrap_or_else(|err| {
         error!("{:?}", err);
         process::exit(1);
@@ -60,7 +73,7 @@ async fn main() {
     }
     let result = futures::future::join_all(all_handle_list).await;
     for r in result {
-        r.unwrap();
+        let _ = r.unwrap();
     }
 }
 

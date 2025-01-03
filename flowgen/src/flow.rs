@@ -1,20 +1,11 @@
 use super::config;
-use arrow::array::RecordBatch;
 use async_nats::jetstream::context::Publish;
 use bytes::Bytes;
-use chrono::Utc;
-use flowgen_core::{
-    client::Client,
-    message::{ChannelMessage, SalesforcePubSubMessage},
-};
+use flowgen_core::{client::Client, message::ChannelMessage};
 use flowgen_file::subscriber::RecordBatchConverter;
-use futures::future::{try_join_all, TryJoinAll};
-use std::{any::Any, ops::DerefMut, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tokio::{
-    sync::{
-        broadcast::{Receiver, Sender},
-        Mutex,
-    },
+    sync::broadcast::{Receiver, Sender},
     task::JoinHandle,
 };
 use tracing::{error, event, info, Level};
@@ -44,6 +35,7 @@ pub enum Error {
 #[allow(non_camel_case_types)]
 pub enum Processor {}
 
+#[derive(Debug)]
 pub struct Flow {
     config: config::Config,
     pub handle_list: Option<Vec<JoinHandle<Result<(), Error>>>>,
@@ -252,7 +244,7 @@ impl Flow {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Builder {
     config_path: PathBuf,
 }
