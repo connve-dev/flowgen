@@ -8,7 +8,7 @@ use oauth2::{
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tracing::{event, instrument, Level};
+use tracing::{event, Level};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

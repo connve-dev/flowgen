@@ -1,10 +1,10 @@
 use flowgen_core::{
     client::Client,
-    message::{ChannelMessage, SalesforcePubSubMessage},
+    message::{Message, RecordBatchExt},
 };
-
 use futures_util::future::TryJoinAll;
-use salesforce_pubsub::eventbus::v1::{FetchRequest, TopicInfo, TopicRequest};
+use salesforce_pubsub::eventbus::v1::{FetchRequest, SchemaRequest, TopicRequest};
+use serde_json::Value;
 use std::sync::Arc;
 use tokio::{
     sync::{broadcast::Sender, Mutex},
@@ -22,7 +22,7 @@ pub enum Error {
     #[error("There was an error executing async task.")]
     TokioJoin(#[source] tokio::task::JoinError),
     #[error("There was an error with sending message over channel.")]
-    TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<ChannelMessage>),
+    TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<Message>),
     #[error("There was an error deserializing data into binary format.")]
     Bincode(#[source] bincode::Error),
 }
@@ -49,7 +49,7 @@ impl Subscriber {
 pub struct Builder {
     service: flowgen_core::service::Service,
     config: super::config::Source,
-    tx: Sender<ChannelMessage>,
+    tx: Sender<Message>,
 }
 
 impl Builder {
@@ -57,7 +57,7 @@ impl Builder {
     pub fn new(
         service: flowgen_core::service::Service,
         config: super::config::Source,
-        tx: &Sender<ChannelMessage>,
+        tx: &Sender<Message>,
     ) -> Builder {
         Builder {
             service,
@@ -92,11 +92,21 @@ impl Builder {
 
             let tx = self.tx.clone();
             let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                let topic_info: TopicInfo = pubsub
+                let topic_info = pubsub
                     .lock()
                     .await
                     .get_topic(TopicRequest {
                         topic_name: topic.clone(),
+                    })
+                    .await
+                    .map_err(Error::FlowgenSalesforcePubSub)?
+                    .into_inner();
+
+                let schema_info = pubsub
+                    .lock()
+                    .await
+                    .get_schema(SchemaRequest {
+                        schema_id: topic_info.schema_id,
                     })
                     .await
                     .map_err(Error::FlowgenSalesforcePubSub)?
@@ -118,12 +128,23 @@ impl Builder {
                     match received {
                         Ok(fr) => {
                             for ce in fr.events {
-                                let m = SalesforcePubSubMessage {
-                                    consumer_event: ce,
-                                    topic_info: topic_info.clone(),
-                                };
-                                tx.send(ChannelMessage::salesforce_pubsub(m))
-                                    .map_err(Error::TokioSendMessage)?;
+                                let event = ce.clone().event.unwrap();
+                                let schema: serde_avro_fast::Schema =
+                                    schema_info.schema_json.parse().unwrap();
+                                let value = serde_avro_fast::from_datum_slice::<Value>(
+                                    &event.payload[..],
+                                    &schema,
+                                )
+                                .unwrap();
+
+                                let data = value.to_recordbatch().unwrap();
+
+                                let topic = topic_info.topic_name.replace('/', ".").to_lowercase();
+                                let subject =
+                                    format!("salesforce.pubsub.in.{}.{}", &topic[1..], event.id);
+
+                                let m = Message { data, subject };
+                                tx.send(m).map_err(Error::TokioSendMessage)?;
                             }
                         }
                         Err(e) => {

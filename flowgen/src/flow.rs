@@ -1,8 +1,7 @@
 use super::config;
 use async_nats::jetstream::context::Publish;
 use bytes::Bytes;
-use flowgen_core::{client::Client, message::ChannelMessage};
-use flowgen_file::subscriber::RecordBatchConverter;
+use flowgen_core::{client::Client, message::Message};
 use std::{path::PathBuf, sync::Arc};
 use tokio::{
     sync::broadcast::{Receiver, Sender},
@@ -55,8 +54,7 @@ impl Flow {
         let config = self.config.clone();
 
         let mut handle_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
-        let (tx, _): (Sender<ChannelMessage>, Receiver<ChannelMessage>) =
-            tokio::sync::broadcast::channel(1000);
+        let (tx, _): (Sender<Message>, Receiver<Message>) = tokio::sync::broadcast::channel(1000);
 
         // Setup source subscribers.
         match config.flow.source {
@@ -130,19 +128,21 @@ impl Flow {
                     let publisher = publisher.clone();
                     let mut rx = tx.subscribe();
                     let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        while let Ok(message) = rx.recv().await {
-                            if let ChannelMessage::file(m) = message {
-                                let event = m.record_batch.to_bytes().unwrap();
-                                let subject = format!("filedrop.in.{}", m.file_chunk);
+                        while let Ok(m) = rx.recv().await {
+                            let event: Vec<u8> = m.try_into().unwrap();
+                            let subject = "test";
+                            // if let ChannelMessage::file(m) = message {
 
-                                publisher
-                                    .jetstream
-                                    .send_publish(subject, Publish::build().payload(event.into()))
-                                    .await
-                                    .map_err(Error::NatsPublish)?;
+                            //     let subject = format!("filedrop.in.{}", m.file_chunk);
 
-                                event!(Level::INFO, "file_chunk: {}", m.file_chunk);
-                            }
+                            publisher
+                                .jetstream
+                                .send_publish(subject, Publish::build().payload(event.into()))
+                                .await
+                                .map_err(Error::NatsPublish)?;
+
+                            //     event!(Level::INFO, "file_chunk: {}", m.file_chunk);
+                            // }
                         }
                         Ok(())
                     });
@@ -154,31 +154,30 @@ impl Flow {
                     let mut rx = tx.subscribe();
                     let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                         while let Ok(message) = rx.recv().await {
-                            if let ChannelMessage::salesforce_pubsub(ref m) = message {
-                                if let Some(pe) = &m.consumer_event.event {
-                                    let event = Bytes::from(m.clone());
-                                    let s =
-                                        m.topic_info.topic_name.replace('/', ".").to_lowercase();
-                                    let event_name = &s[1..];
-                                    let subject =
-                                        format!("salesforce.pubsub.in.{}.{}", event_name, pe.id);
+                            // if let ChannelMessage::salesforce_pubsub(ref m) = message {
+                            //     if let Some(pe) = &m.consumer_event.event {
+                            //         let event = Bytes::from(m.clone());
+                            //         let s =
+                            //             m.topic_info.topic_name.replace('/', ".").to_lowercase();
+                            //         let event_name = &s[1..];
+                            //         let subject =
+                            //             format!("salesforce.pubsub.in.{}.{}", event_name, pe.id);
 
-                                    publisher
-                                        .jetstream
-                                        .send_publish(subject, Publish::build().payload(event))
-                                        .await
-                                        .map_err(Error::NatsPublish)?;
+                            //         publisher
+                            //             .jetstream
+                            //             .send_publish(subject, Publish::build().payload(event))
+                            //             .await
+                            //             .map_err(Error::NatsPublish)?;
 
-                                    event!(Level::INFO, "salesforce_pubsub: {}", pe.id);
-                                }
-                            }
+                            //         event!(Level::INFO, "salesforce_pubsub: {}", pe.id);
+                            //     }
+                            // }
                         }
                         Ok(())
                     });
                     handle_list.push(handle);
                 }
             }
-
             config::Target::deltalake(config) => {
                 // let publisher = flowgen_deltalake::publisher::Builder::new(config)
                 //     .build()
@@ -187,9 +186,9 @@ impl Flow {
                 let mut rx = tx.subscribe();
                 let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                     while let Ok(message) = rx.recv().await {
-                        if let ChannelMessage::nats_jetstream(m) = message {
-                            // m.into()
-                        }
+                        // if let ChannelMessage::nats_jetstream(m) = message {
+                        //     // m.into()
+                        // }
                         // match message {
                         //     ChannelMessage::FileMessage(m) => {
                         //         let event = m.record_batch.to_bytes().unwrap();
@@ -217,10 +216,10 @@ impl Flow {
                 let mut rx = tx.subscribe();
                 let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                     while let Ok(message) = rx.recv().await {
-                        if let ChannelMessage::http(m) = message {
-                            println!("{:?}", m);
-                            // m.into()
-                        }
+                        // if let ChannelMessage::http(m) = message {
+                        //     println!("{:?}", m);
+                        //     // m.into()
+                        // }
                         // match message {
                         //     ChannelMessage::FileMessage(m) => {
                         //         let event = m.record_batch.to_bytes().unwrap();

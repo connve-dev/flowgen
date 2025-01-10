@@ -1,6 +1,11 @@
-use flowgen_core::message::{ChannelMessage, HttpMessage};
+use arrow::{
+    array::{RecordBatch, StringArray},
+    datatypes::{DataType, Field, Schema},
+};
+use flowgen_core::message::Message;
 use futures_util::future::TryJoinAll;
-use std::{collections::HashMap, sync::Arc};
+use serde_json::Value;
+use std::sync::Arc;
 use tokio::{
     sync::broadcast::{Receiver, Sender},
     task::JoinHandle,
@@ -13,7 +18,7 @@ pub enum Error {
     #[error("There was an error executing async task.")]
     TokioJoin(#[source] tokio::task::JoinError),
     #[error("There was an error with sending message over channel.")]
-    TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<ChannelMessage>),
+    TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<Message>),
 }
 
 pub struct Processor {
@@ -37,13 +42,13 @@ impl Processor {
 /// A builder of the http processor.
 pub struct Builder {
     config: super::config::Processor,
-    tx: Sender<ChannelMessage>,
-    rx: Receiver<ChannelMessage>,
+    tx: Sender<Message>,
+    rx: Receiver<Message>,
 }
 
 impl Builder {
     /// Creates a new instance of a Builder.
-    pub fn new(config: super::config::Processor, tx: &Sender<ChannelMessage>) -> Builder {
+    pub fn new(config: super::config::Processor, tx: &Sender<Message>) -> Builder {
         Builder {
             config,
             tx: tx.clone(),
@@ -56,30 +61,34 @@ impl Builder {
         let client = reqwest::Client::builder().https_only(true).build().unwrap();
 
         let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-            while let Ok(message) = self.rx.recv().await {
-                match message {
-                    ChannelMessage::http(_) => {}
-                    _ => {
-                        let response = client
-                            .get(self.config.endpoint.as_str())
-                            .send()
-                            .await
-                            .unwrap()
-                            .json::<HashMap<String, String>>()
-                            .await
-                            .unwrap();
+            while let Ok(m) = self.rx.recv().await {
+                println!("{:?}", m);
+                let response = client
+                    .get(self.config.endpoint.as_str())
+                    .send()
+                    .await
+                    .unwrap()
+                    .json::<Value>()
+                    .await
+                    .unwrap();
 
-                        let m = HttpMessage {
-                            response,
-                            metadata: None,
-                        };
+                let mut fields = Vec::new();
+                let mut values = Vec::new();
 
-                        self.tx
-                            .send(ChannelMessage::http(m))
-                            .map_err(Error::TokioSendMessage)?;
-                    }
+                for (key, value) in response.as_object().unwrap() {
+                    fields.push(Field::new(key, DataType::Utf8, false));
+                    values.push(value.to_string());
                 }
+
+                let schema = Schema::new(fields);
+                let arrays = StringArray::from(values);
+                let data = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(arrays)]).unwrap();
+                let subject = "test".to_string();
+
+                let m = Message { data, subject };
+                self.tx.send(m).map_err(Error::TokioSendMessage)?;
             }
+
             Ok(())
         });
 
