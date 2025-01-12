@@ -1,7 +1,19 @@
+use std::{
+    collections::{BTreeMap, HashMap},
+    time::Duration,
+};
+
+use arrow::array::StringArray;
 use flowgen_core::event::{Event, EventBuilder, RecordBatchExt};
 use futures_util::future::TryJoinAll;
+use handlebars::Handlebars;
+use reqwest::{
+    header::{HeaderMap, HeaderName, HeaderValue},
+    ClientBuilder, RequestBuilder,
+};
 use serde_json::Value;
 use tokio::{
+    fs,
     sync::broadcast::{Receiver, Sender},
     task::JoinHandle,
 };
@@ -17,7 +29,9 @@ pub enum Error {
     #[error("There was an error constructing Flowgen Event.")]
     FlowgenEvent(#[source] flowgen_core::event::Error),
 }
-
+pub struct Test {
+    url: String,
+}
 pub struct Processor {
     handle_list: Vec<JoinHandle<Result<(), Error>>>,
 }
@@ -61,31 +75,62 @@ impl Builder {
 
     pub async fn build(mut self) -> Result<Processor, Error> {
         let mut handle_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
-        let client = reqwest::Client::builder().https_only(true).build().unwrap();
+        let handlebars = Handlebars::new();
+
+        let client = reqwest::ClientBuilder::new()
+            .https_only(true)
+            .build()
+            .unwrap();
 
         let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-            while let Ok(m) = self.rx.recv().await {
-                if m.current_task_id == Some(self.current_task_id - 1) {
-                    let response = client
-                        .get(self.config.endpoint.as_str())
-                        .send()
-                        .await
-                        .unwrap()
-                        .json::<Value>()
-                        .await
-                        .unwrap();
+            while let Ok(e) = self.rx.recv().await {
+                if e.current_task_id == Some(self.current_task_id - 1) {
+                    let endpoint = &self.config.endpoint;
 
-                    let data = response.to_recordbatch().unwrap();
-                    let subject = "http.respone.out".to_string();
+                    let mut data = HashMap::new();
+                    if let Some(inputs) = &self.config.inputs {
+                        for (key, value) in inputs {
+                            let array: StringArray =
+                                e.data.column_by_name(value).unwrap().to_data().into();
 
-                    let e = EventBuilder::new()
-                        .data(data)
-                        .subject(subject)
-                        .current_task_id(self.current_task_id)
-                        .build()
-                        .map_err(Error::FlowgenEvent)?;
+                            // println!("{:?}", e.data);
+                            for item in &array {
+                                if let Some(v) = item {
+                                    data.insert(key, v.to_string());
+                                }
+                            }
+                        }
+                    }
 
-                    self.tx.send(e).map_err(Error::TokioSendMessage)?;
+                    let endpoint = handlebars.render_template(endpoint, &data).unwrap();
+                    println!("{:?}", endpoint);
+                    // let client = client.get(&self.config.endpoint);
+                    // let mut text_resp = String::new();
+
+                    // if let Some(ref bearer_auth) = self.config.bearer_auth {
+                    //     let token = fs::read_to_string(bearer_auth).await.unwrap();
+                    //     text_resp = client
+                    //         .bearer_auth(token)
+                    //         .send()
+                    //         .await
+                    //         .unwrap()
+                    //         .text()
+                    //         .await
+                    //         .unwrap();
+                    // };
+
+                    // let resp: serde_json::Value = serde_json::from_str(&text_resp).unwrap();
+                    // let data: arrow::array::RecordBatch = resp.to_recordbatch().unwrap();
+                    // let subject = "http.respone.out".to_string();
+
+                    // let e = EventBuilder::new()
+                    //     .data(data)
+                    //     .subject(subject)
+                    //     .current_task_id(self.current_task_id)
+                    //     .build()
+                    //     .map_err(Error::FlowgenEvent)?;
+
+                    // self.tx.send(e).map_err(Error::TokioSendMessage)?;
                 }
             }
             Ok(())

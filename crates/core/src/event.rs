@@ -2,7 +2,7 @@ use arrow::{
     array::{Array, RecordBatch, StringArray},
     datatypes::{DataType, Field},
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -19,6 +19,7 @@ pub struct Event {
     pub data: arrow::array::RecordBatch,
     pub subject: String,
     pub current_task_id: Option<usize>,
+    pub extensions: HashMap<String, String>,
 }
 
 #[derive(PartialEq, Debug, Clone, Default)]
@@ -26,6 +27,7 @@ pub struct EventBuilder {
     pub data: Option<arrow::array::RecordBatch>,
     pub subject: Option<String>,
     pub current_task_id: Option<usize>,
+    pub extensions: HashMap<String, String>,
 }
 
 impl EventBuilder {
@@ -55,6 +57,7 @@ impl EventBuilder {
                 .subject
                 .ok_or_else(|| Error::MissingRequiredAttribute("subject".to_string()))?,
             current_task_id: self.current_task_id,
+            extensions: Default::default(),
         })
     }
 }
@@ -73,7 +76,8 @@ impl RecordBatchExt for serde_json::Value {
 
         for (key, value) in map {
             fields.push(Field::new(key, DataType::Utf8, true));
-            let array = StringArray::from(vec![Some(value.to_string())]);
+            let v = value.to_string().trim_matches('"').to_string();
+            let array = StringArray::from(vec![Some(v)]);
             values.push(Arc::new(array));
         }
 
