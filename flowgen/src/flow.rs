@@ -1,14 +1,14 @@
+use crate::config::Task;
+
 use super::config;
-use async_nats::jetstream::context::Publish;
-use bytes::Bytes;
-use flowgen_core::{client::Client, message::ChannelMessage};
-use flowgen_file::subscriber::RecordBatchConverter;
+use flowgen_core::{client::Client, event::Event};
+use flowgen_nats::jetstream::message::FlowgenMessageExt;
 use std::{path::PathBuf, sync::Arc};
 use tokio::{
     sync::broadcast::{Receiver, Sender},
     task::JoinHandle,
 };
-use tracing::{error, event, info, Level};
+use tracing::{error, event, Level};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -24,6 +24,8 @@ pub enum Error {
     FlowgenNatsJetStreamPublisher(#[source] flowgen_nats::jetstream::publisher::Error),
     #[error("There was an error with Flowgen Nats JetStream Subscriber.")]
     FlowgenNatsJetStreamSubscriber(#[source] flowgen_nats::jetstream::subscriber::Error),
+    #[error("There was an error with Flowgen Nats JetStream Event.")]
+    FlowgenNatsJetStreamEventError(#[source] flowgen_nats::jetstream::message::Error),
     #[error("There was an error with Flowgen File Subscriber.")]
     FlowgenFileSubscriberError(#[source] flowgen_file::subscriber::Error),
     #[error("Failed to publish message to Nats Jetstream.")]
@@ -55,190 +57,263 @@ impl Flow {
         let config = self.config.clone();
 
         let mut handle_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
-        let (tx, _): (Sender<ChannelMessage>, Receiver<ChannelMessage>) =
-            tokio::sync::broadcast::channel(1000);
+        let (tx, _): (Sender<Event>, Receiver<Event>) = tokio::sync::broadcast::channel(1000);
 
-        // Setup source subscribers.
-        match config.flow.source {
-            config::Source::nats_jetstream(config) => {
-                flowgen_nats::jetstream::subscriber::Builder::new(config, &tx)
-                    .build()
-                    .await
-                    .map_err(Error::FlowgenNatsJetStreamSubscriber)?
-                    .subscribe()
-                    .await
-                    .map_err(Error::FlowgenNatsJetStreamSubscriber)?;
-            }
-            config::Source::file(config) => {
-                flowgen_file::subscriber::Builder::new(config, &tx)
-                    .build()
-                    .await
-                    .map_err(Error::FlowgenFileSubscriberError)?
-                    .subscribe()
-                    .await
-                    .map_err(Error::FlowgenFileSubscriberError)?;
-            }
-            config::Source::salesforce_pubsub(config) => {
-                flowgen_salesforce::pubsub::subscriber::Builder::new(service.clone(), config, &tx)
-                    .build()
-                    .await
-                    .map_err(Error::FlowgenSalesforcePubSubSubscriberError)?
-                    .subscribe()
-                    .await
-                    .map_err(Error::FlowgenSalesforcePubSubSubscriberError)?;
-            }
-            _ => {
-                info!("unimplemented");
-            }
-        }
-
-        // Setup processors.
-        if let Some(procesor_list) = config.flow.processor {
-            for processor in procesor_list {
-                match processor {
+        for (i, task) in config.flow.tasks.iter().enumerate() {
+            match task {
+                Task::source(source) => match source {
+                    config::Source::salesforce_pubsub(config) => {
+                        flowgen_salesforce::pubsub::subscriber::Builder::new(
+                            service.clone(),
+                            config.clone(),
+                            &tx,
+                            i,
+                        )
+                        .build()
+                        .await
+                        .map_err(Error::FlowgenSalesforcePubSubSubscriberError)?
+                        .subscribe()
+                        .await
+                        .map_err(Error::FlowgenSalesforcePubSubSubscriberError)?;
+                    }
+                    config::Source::nats_jetstream(config) => {
+                        flowgen_nats::jetstream::subscriber::Builder::new(config.clone(), &tx, i)
+                            .build()
+                            .await
+                            .map_err(Error::FlowgenNatsJetStreamSubscriber)?
+                            .subscribe()
+                            .await
+                            .map_err(Error::FlowgenNatsJetStreamSubscriber)?;
+                    }
+                    _ => {}
+                },
+                Task::processor(processor) => match processor {
                     config::Processor::http(config) => {
-                        let processor = flowgen_http::processor::Builder::new(config, &tx)
+                        flowgen_http::processor::Builder::new(config.clone(), &tx, i)
                             .build()
                             .await
                             .unwrap()
                             .process()
-                            .await;
+                            .await
+                            .unwrap()
+                    }
+                },
+                Task::target(target) => match target {
+                    config::Target::nats_jetstream(config) => {
+                        let publisher =
+                            flowgen_nats::jetstream::publisher::Builder::new(config.clone())
+                                .build()
+                                .await
+                                .map_err(Error::FlowgenNatsJetStreamPublisher)?;
+                        let publisher = Arc::new(publisher);
+
+                        {
+                            let publisher = publisher.clone();
+                            let mut rx = tx.subscribe();
+                            let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                                while let Ok(e) = rx.recv().await {
+                                    if e.current_task_id == Some(i - 1) {
+                                        let event = e
+                                            .to_publish()
+                                            .map_err(Error::FlowgenNatsJetStreamEventError)?;
+
+                                        publisher
+                                            .jetstream
+                                            .send_publish(e.subject.clone(), event)
+                                            .await
+                                            .map_err(Error::NatsPublish)?;
+
+                                        event!(Level::INFO, "event processed: {}", e.subject);
+                                    }
+                                }
+                                Ok(())
+                            });
+                            handle_list.push(handle);
+                        }
+                    }
+                    config::Target::salesforce_pubsub(config) => {
+                        let rx = tx.subscribe();
+                        let publisher =
+                            flowgen_salesforce::pubsub::publisher::PublisherBuilder::new()
+                                .service(service.clone())
+                                .config(config.clone())
+                                .receiver(rx)
+                                .current_task_id(i)
+                                .build()
+                                .await
+                                .unwrap()
+                                .publish()
+                                .await
+                                .unwrap();
 
                         // let mut rx = tx.subscribe();
                         // let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        //     while let Ok(message) = rx.recv().await {
-                        //         println!("{:?}", message);
+                        //     while let Ok(e) = rx.recv().await {
+                        //         if e.current_task_id == Some(i - 1) {
+                        //             println!("{:?}", e);
+                        //         }
                         //     }
                         //     Ok(())
                         // });
                         // handle_list.push(handle);
                     }
-                }
+                    _ => {}
+                },
+                _ => {}
             }
         }
+        // // Setup source subscribers.
+        // match config.flow.source {
+        //     config::Source::nats_jetstream(config) => {
+        //         flowgen_nats::jetstream::subscriber::Builder::new(config, &tx)
+        //             .build()
+        //             .await
+        //             .map_err(Error::FlowgenNatsJetStreamSubscriber)?
+        //             .subscribe()
+        //             .await
+        //             .map_err(Error::FlowgenNatsJetStreamSubscriber)?;
+        //     }
+        //     config::Source::file(config) => {
+        //         flowgen_file::subscriber::Builder::new(config, &tx)
+        //             .build()
+        //             .await
+        //             .map_err(Error::FlowgenFileSubscriberError)?
+        //             .subscribe()
+        //             .await
+        //             .map_err(Error::FlowgenFileSubscriberError)?;
+        //     }
+        //     config::Source::salesforce_pubsub(config) => {
+        //         flowgen_salesforce::pubsub::subscriber::Builder::new(service.clone(), config, &tx)
+        //             .build()
+        //             .await
+        //             .map_err(Error::FlowgenSalesforcePubSubSubscriberError)?
+        //             .subscribe()
+        //             .await
+        //             .map_err(Error::FlowgenSalesforcePubSubSubscriberError)?;
+        //     }
+        //     _ => {
+        //         info!("unimplemented");
+        //     }
+        // }
 
-        // Setup target publishers.
-        match config.flow.target {
-            config::Target::nats_jetstream(config) => {
-                let publisher = flowgen_nats::jetstream::publisher::Builder::new(config)
-                    .build()
-                    .await
-                    .map_err(Error::FlowgenNatsJetStreamPublisher)?;
-                let publisher = Arc::new(publisher);
+        // // Setup processors.
+        // if let Some(procesor_list) = config.flow.processor {
+        //     for processor in procesor_list {
+        //         match processor {
+        //             config::Processor::http(config) => {
+        //                 let processor = flowgen_http::processor::Builder::new(config, &tx)
+        //                     .build()
+        //                     .await
+        //                     .unwrap()
+        //                     .process()
+        //                     .await;
 
-                {
-                    let publisher = publisher.clone();
-                    let mut rx = tx.subscribe();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        while let Ok(message) = rx.recv().await {
-                            if let ChannelMessage::file(m) = message {
-                                let event = m.record_batch.to_bytes().unwrap();
-                                let subject = format!("filedrop.in.{}", m.file_chunk);
+        //                 // let mut rx = tx.subscribe();
+        //                 // let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+        //                 //     while let Ok(message) = rx.recv().await {
+        //                 //         println!("{:?}", message);
+        //                 //     }
+        //                 //     Ok(())
+        //                 // });
+        //                 // handle_list.push(handle);
+        //             }
+        //         }
+        //     }
+        // }
 
-                                publisher
-                                    .jetstream
-                                    .send_publish(subject, Publish::build().payload(event.into()))
-                                    .await
-                                    .map_err(Error::NatsPublish)?;
+        // // Setup target publishers.
+        // match config.flow.target {
+        //     config::Target::nats_jetstream(config) => {
+        //         let publisher = flowgen_nats::jetstream::publisher::Builder::new(config)
+        //             .build()
+        //             .await
+        //             .map_err(Error::FlowgenNatsJetStreamPublisher)?;
+        //         let publisher = Arc::new(publisher);
 
-                                event!(Level::INFO, "file_chunk: {}", m.file_chunk);
-                            }
-                        }
-                        Ok(())
-                    });
-                    handle_list.push(handle);
-                }
+        //         {
+        //             let publisher = publisher.clone();
+        //             let mut rx = tx.subscribe();
+        //             let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+        //                 while let Ok(m) = rx.recv().await {
+        //                     let event = m
+        //                         .to_publish()
+        //                         .map_err(Error::FlowgenNatsJetStreamEventError)?;
 
-                {
-                    let publisher = publisher.clone();
-                    let mut rx = tx.subscribe();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        while let Ok(message) = rx.recv().await {
-                            if let ChannelMessage::salesforce_pubsub(ref m) = message {
-                                if let Some(pe) = &m.consumer_event.event {
-                                    let event = Bytes::from(m.clone());
-                                    let s =
-                                        m.topic_info.topic_name.replace('/', ".").to_lowercase();
-                                    let event_name = &s[1..];
-                                    let subject =
-                                        format!("salesforce.pubsub.in.{}.{}", event_name, pe.id);
+        //                     publisher
+        //                         .jetstream
+        //                         .send_publish(m.subject.clone(), event)
+        //                         .await
+        //                         .map_err(Error::NatsPublish)?;
 
-                                    publisher
-                                        .jetstream
-                                        .send_publish(subject, Publish::build().payload(event))
-                                        .await
-                                        .map_err(Error::NatsPublish)?;
+        //                     event!(Level::INFO, "event processed: {}", m.subject);
+        //                 }
+        //                 Ok(())
+        //             });
+        //             handle_list.push(handle);
+        //         }
+        //     }
+        //     config::Target::deltalake(config) => {
+        //         // let publisher = flowgen_deltalake::publisher::Builder::new(config)
+        //         //     .build()
+        //         //     .await
+        //         //     .unwrap();
+        //         let mut rx = tx.subscribe();
+        //         let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+        //             while let Ok(m) = rx.recv().await {
+        //                 // println!("{:?}", m);
+        //                 // if let ChannelMessage::nats_jetstream(m) = message {
+        //                 //     // m.into()
+        //                 // }
+        //                 // match message {
+        //                 //     ChannelMessage::FileMessage(m) => {
+        //                 //         let event = m.record_batch.to_bytes().unwrap();
+        //                 //         let subject = format!("filedrop.in.{}", m.file_chunk);
+        //                 //         publisher
+        //                 //             .jetstream
+        //                 //             .send_publish(subject, Publish::build().payload(event.into()))
+        //                 //             .await
+        //                 //             .map_err(Error::NatsPublish)?;
+        //                 //         event!(Level::INFO, "event: file processed {}", m.file_chunk);
+        //                 //     }
+        //                 // }
+        //             }
+        //             Ok(())
+        //         });
+        //         handle_list.push(handle);
+        //     }
+        //     config::Target::salesforce_pubsub(config) => {
+        //         let publisher =
+        //             flowgen_salesforce::pubsub::publisher::Builder::new(config, service)
+        //                 .build()
+        //                 .await
+        //                 .unwrap();
 
-                                    event!(Level::INFO, "salesforce_pubsub: {}", pe.id);
-                                }
-                            }
-                        }
-                        Ok(())
-                    });
-                    handle_list.push(handle);
-                }
-            }
-
-            config::Target::deltalake(config) => {
-                // let publisher = flowgen_deltalake::publisher::Builder::new(config)
-                //     .build()
-                //     .await
-                //     .unwrap();
-                let mut rx = tx.subscribe();
-                let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                    while let Ok(message) = rx.recv().await {
-                        if let ChannelMessage::nats_jetstream(m) = message {
-                            // m.into()
-                        }
-                        // match message {
-                        //     ChannelMessage::FileMessage(m) => {
-                        //         let event = m.record_batch.to_bytes().unwrap();
-                        //         let subject = format!("filedrop.in.{}", m.file_chunk);
-                        //         publisher
-                        //             .jetstream
-                        //             .send_publish(subject, Publish::build().payload(event.into()))
-                        //             .await
-                        //             .map_err(Error::NatsPublish)?;
-                        //         event!(Level::INFO, "event: file processed {}", m.file_chunk);
-                        //     }
-                        // }
-                    }
-                    Ok(())
-                });
-                handle_list.push(handle);
-            }
-            config::Target::salesforce_pubsub(config) => {
-                let publisher =
-                    flowgen_salesforce::pubsub::publisher::Builder::new(config, service)
-                        .build()
-                        .await
-                        .unwrap();
-
-                let mut rx = tx.subscribe();
-                let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                    while let Ok(message) = rx.recv().await {
-                        if let ChannelMessage::http(m) = message {
-                            println!("{:?}", m);
-                            // m.into()
-                        }
-                        // match message {
-                        //     ChannelMessage::FileMessage(m) => {
-                        //         let event = m.record_batch.to_bytes().unwrap();
-                        //         let subject = format!("filedrop.in.{}", m.file_chunk);
-                        //         publisher
-                        //             .jetstream
-                        //             .send_publish(subject, Publish::build().payload(event.into()))
-                        //             .await
-                        //             .map_err(Error::NatsPublish)?;
-                        //         event!(Level::INFO, "event: file processed {}", m.file_chunk);
-                        //     }
-                        // }
-                    }
-                    Ok(())
-                });
-                handle_list.push(handle);
-            }
-        }
+        //         let mut rx = tx.subscribe();
+        //         let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+        //             while let Ok(m) = rx.recv().await {
+        //                 println!("{:?}", m);
+        //                 // if let ChannelMessage::http(m) = message {
+        //                 //     println!("{:?}", m);
+        //                 //     // m.into()
+        //                 // }
+        //                 // match message {
+        //                 //     ChannelMessage::FileMessage(m) => {
+        //                 //         let event = m.record_batch.to_bytes().unwrap();
+        //                 //         let subject = format!("filedrop.in.{}", m.file_chunk);
+        //                 //         publisher
+        //                 //             .jetstream
+        //                 //             .send_publish(subject, Publish::build().payload(event.into()))
+        //                 //             .await
+        //                 //             .map_err(Error::NatsPublish)?;
+        //                 //         event!(Level::INFO, "event: file processed {}", m.file_chunk);
+        //                 //     }
+        //                 // }
+        //             }
+        //             Ok(())
+        //         });
+        //         handle_list.push(handle);
+        //     }
+        // }
         self.handle_list = Some(handle_list);
         Ok(self)
     }

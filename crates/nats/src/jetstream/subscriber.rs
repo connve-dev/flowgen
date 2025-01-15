@@ -1,4 +1,5 @@
-use flowgen_core::{client::Client, message::ChannelMessage};
+use super::message::NatsMessageExt;
+use flowgen_core::{client::Client, event::Event};
 use futures_util::future::TryJoinAll;
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tokio_stream::StreamExt;
@@ -7,12 +8,14 @@ use tokio_stream::StreamExt;
 pub enum Error {
     #[error("There was an error authorizating to Nats client.")]
     NatsClientAuth(#[source] crate::client::Error),
+    #[error("There was an error with Nats JetStream Message.")]
+    NatsJetStreamMessage(#[source] crate::jetstream::message::Error),
     #[error("There was an error subscriging to Nats subject.")]
     NatsSubscribe(#[source] async_nats::SubscribeError),
     #[error("There was an error executing async task.")]
     TokioJoin(#[source] tokio::task::JoinError),
     #[error("There was an error with sending message over channel.")]
-    TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<ChannelMessage>),
+    TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<Event>),
 }
 
 pub struct Subscriber {
@@ -36,15 +39,21 @@ impl Subscriber {
 /// A builder of the file reader.
 pub struct Builder {
     config: super::config::Source,
-    tx: Sender<ChannelMessage>,
+    tx: Sender<Event>,
+    current_task_id: usize,
 }
 
 impl Builder {
     /// Creates a new instance of a Builder.
-    pub fn new(config: super::config::Source, tx: &Sender<ChannelMessage>) -> Builder {
+    pub fn new(
+        config: super::config::Source,
+        tx: &Sender<Event>,
+        current_task_id: usize,
+    ) -> Builder {
         Builder {
             config,
             tx: tx.clone(),
+            current_task_id,
         }
     }
 
@@ -65,10 +74,10 @@ impl Builder {
                     .subscribe(self.config.subject)
                     .await
                     .map_err(Error::NatsSubscribe)?;
-                while let Some(m) = subscriber.next().await {
-                    self.tx
-                        .send(ChannelMessage::nats_jetstream(m))
-                        .map_err(Error::TokioSendMessage)?;
+                while let Some(message) = subscriber.next().await {
+                    let mut e = message.to_event().map_err(Error::NatsJetStreamMessage)?;
+                    e.current_task_id = Some(self.current_task_id);
+                    self.tx.send(e).map_err(Error::TokioSendMessage)?;
                 }
                 Ok(())
             });

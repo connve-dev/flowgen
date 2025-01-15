@@ -1,8 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use flowgen_core::config::Inputs;
+use serde::Deserialize;
+use std::collections::HashMap;
 
-#[derive(serde::Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct Processor {
-    pub payload: HashMap<String, String>,
-    pub endpoint: Arc<String>,
-    pub metadata: Option<HashMap<String, String>>,
+    pub endpoint: String,
+    pub payload: Option<HashMap<String, String>>,
+    pub headers: Option<HashMap<String, String>>,
+    pub credentials: Option<String>,
+    pub inputs: Option<HashMap<String, Inputs>>,
 }

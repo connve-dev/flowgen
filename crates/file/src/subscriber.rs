@@ -4,7 +4,7 @@ use arrow::{
     ipc::writer::StreamWriter,
 };
 use chrono::Utc;
-use flowgen_core::message::ChannelMessage;
+use flowgen_core::event::Event;
 use futures::future::TryJoinAll;
 use std::{fs::File, io::Seek, sync::Arc};
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
@@ -18,7 +18,7 @@ pub enum Error {
     #[error("There was an error deserializing data into binary format.")]
     Arrow(#[source] arrow::error::ArrowError),
     #[error("There was an error with sending message over channel.")]
-    TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<ChannelMessage>),
+    TokioSendMessage(#[source] tokio::sync::broadcast::error::SendError<Event>),
 }
 
 pub trait RecordBatchConverter {
@@ -61,12 +61,12 @@ impl Subscriber {
 /// A builder of the file reader.
 pub struct Builder {
     config: super::config::Source,
-    tx: Sender<ChannelMessage>,
+    tx: Sender<Event>,
 }
 
 impl Builder {
     /// Creates a new instance of a Builder.
-    pub fn new(config: super::config::Source, tx: &Sender<ChannelMessage>) -> Builder {
+    pub fn new(config: super::config::Source, tx: &Sender<Event>) -> Builder {
         Builder {
             config,
             tx: tx.clone(),
@@ -98,13 +98,14 @@ impl Builder {
                     None => break,
                 };
                 let file_chunk = format!("{}.{}", filename, timestamp);
-                let m = flowgen_core::message::FileMessage {
-                    record_batch,
-                    file_chunk,
-                };
-                self.tx
-                    .send(ChannelMessage::file(m))
-                    .map_err(Error::TokioSendMessage)?;
+
+                // let m = flowgen_core::message::FileMessage {
+                //     record_batch,
+                //     file_chunk,
+                // };
+                // self.tx
+                //     .send(ChannelMessage::file(m))
+                //     .map_err(Error::TokioSendMessage)?;
             }
             Ok(())
         });
