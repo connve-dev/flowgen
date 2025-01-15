@@ -1,6 +1,7 @@
 use arrow::{
-    array::{Array, RecordBatch, StringArray},
-    datatypes::{DataType, Field},
+    array::{self, Array, MapArray, MapBuilder, RecordBatch, StringArray, StringBuilder},
+    datatypes::{DataType, Field, Fields},
+    ipc::Utf8,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -76,19 +77,45 @@ impl RecordBatchExt for serde_json::Value {
     fn to_recordbatch(&self) -> Result<arrow::array::RecordBatch, Self::Error> {
         let map = self.as_object().ok_or_else(Error::NotObject)?;
         let mut fields = Vec::new();
-        let mut values = Vec::new();
+        let mut columns: Vec<Arc<dyn Array>> = Vec::new();
 
         for (key, value) in map {
-            fields.push(Field::new(key, DataType::Utf8, true));
-            let v = value.to_string().trim_matches('"').to_string();
-            let array = StringArray::from(vec![Some(v)]);
-            values.push(Arc::new(array));
+            if value.is_string() {
+                fields.push(Field::new(key, DataType::Utf8, true));
+                let v = value.to_string().trim_matches('"').to_string();
+                let array = StringArray::from(vec![Some(v)]);
+                columns.push(Arc::new(array));
+            }
+            if value.is_object() {
+                fields.push(Field::new(
+                    key,
+                    DataType::Map(
+                        Arc::new(Field::new(
+                            "entries",
+                            DataType::Struct(Fields::from(vec![
+                                Field::new("keys", DataType::Utf8, false),
+                                Field::new("values", DataType::Utf8, true),
+                            ])),
+                            false,
+                        )),
+                        false,
+                    ),
+                    false,
+                ));
+                let key_builder = StringBuilder::new();
+                let value_builder = StringBuilder::new();
+                let mut builder = MapBuilder::new(None, key_builder, value_builder);
+                for (key, value) in value.as_object().unwrap() {
+                    builder.keys().append_value(key);
+                    builder
+                        .values()
+                        .append_value(value.to_string().trim_matches('"'));
+                    builder.append(true).unwrap();
+                }
+                let array = builder.finish();
+                columns.push(Arc::new(array));
+            }
         }
-
-        let columns = values
-            .into_iter()
-            .map(|x| x as Arc<dyn Array>)
-            .collect::<Vec<Arc<dyn Array>>>();
 
         let schema = arrow::datatypes::Schema::new(fields);
         let batch = RecordBatch::try_new(Arc::new(schema), columns).map_err(Error::Arrow)?;
