@@ -1,6 +1,7 @@
-use arrow::array::StringArray;
+use arrow::array::{MapArray, StringArray};
 use flowgen_core::{client::Client, event::Event};
 use handlebars::Handlebars;
+use prost_types::value;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{sync::broadcast::Receiver, task::JoinHandle};
 
@@ -43,30 +44,46 @@ impl Publisher {
             while let Ok(e) = self.rx.recv().await {
                 if e.current_task_id == Some(self.current_task_id - 1) {
                     println!("{:?}", e);
-                    let mut data = HashMap::new();
+                    // let mut data = HashMap::new();
                     if let Some(inputs) = &self.config.inputs {
                         for (key, input) in inputs {
                             if !input.is_static && !input.is_extension {
-                                let array: StringArray = e
+                                let array: MapArray = e
                                     .data
                                     .column_by_name(&input.value)
                                     .unwrap()
                                     .to_data()
                                     .into();
 
-                                for item in (&array).into_iter().flatten() {
-                                    data.insert(key.to_string(), item.to_string());
-                                }
+                                let keys = array.keys();
+                                println!("{:?}", keys);
+                                let entries = array.entries();
+                                println!("{:?}", array.value(0).column_by_name("values"));
+                                // for data in array.iter().flatten() {
+                                //     if let Some(nested_inputs) = &input.inputs {
+                                //         for (key, input) in nested_inputs {
+                                //             let array: StringArray = data
+                                //                 .column_by_name(&input.value)
+                                //                 .unwrap()
+                                //                 .to_data()
+                                //                 .into();
+                                //             println!("{:?}", array);
+                                //         }
+                                //     }
+                                // }
+                                // for item in (&array).into_iter().flatten() {
+                                //     data.insert(key.to_string(), item.to_string());
+                                // }
                             }
                         }
                     }
 
-                    let serialized_payload = serde_json::to_string(&self.config.payload).unwrap();
-                    let payload = handlebars
-                        .render_template(&serialized_payload, &data)
-                        .unwrap();
+                    // let serialized_payload = serde_json::to_string(&self.config.payload).unwrap();
+                    // let payload = handlebars
+                    //     .render_template(&serialized_payload, &data)
+                    //     .unwrap();
 
-                    println!("{:?}", payload);
+                    // println!("{:?}", payload);
                 }
             }
         });
