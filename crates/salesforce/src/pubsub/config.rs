@@ -1,4 +1,4 @@
-use flowgen_core::config::Inputs;
+use flowgen_core::config::Input;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -14,5 +14,5 @@ pub struct Target {
     pub credentials: String,
     pub topic: String,
     pub payload: HashMap<String, String>,
-    pub inputs: Option<HashMap<String, Inputs>>,
+    pub inputs: Option<HashMap<String, Input>>,
 }

@@ -1,4 +1,4 @@
-use flowgen_core::config::Inputs;
+use flowgen_core::config::Input;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -8,5 +8,5 @@ pub struct Processor {
     pub payload: Option<HashMap<String, String>>,
     pub headers: Option<HashMap<String, String>>,
     pub credentials: Option<String>,
-    pub inputs: Option<HashMap<String, Inputs>>,
+    pub inputs: Option<HashMap<String, Input>>,
 }

@@ -1,6 +1,6 @@
 use flowgen_core::{
     client::Client,
-    event::{Event, EventBuilder, RecordBatchExt},
+    event::{Event, EventBuilder, SerdeValueExt},
 };
 use futures_util::future::TryJoinAll;
 use salesforce_pubsub::eventbus::v1::{FetchRequest, SchemaRequest, TopicRequest};

@@ -1,9 +1,18 @@
-use arrow::array::{MapArray, StringArray};
+use arrow::{
+    array::{MapArray, StringArray},
+    datatypes::DataType,
+};
 use flowgen_core::{client::Client, event::Event};
 use handlebars::Handlebars;
-use prost_types::value;
-use std::{collections::HashMap, sync::Arc};
-use tokio::{sync::broadcast::Receiver, task::JoinHandle};
+use salesforce_pubsub::eventbus::v1::{
+    ProducerEvent, PublishRequest, SchemaInfo, SchemaRequest, TopicRequest,
+};
+use serde_json::Value;
+use std::{collections::HashMap, str::FromStr, sync::Arc};
+use tokio::{
+    sync::{broadcast::Receiver, Mutex},
+    task::JoinHandle,
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -24,7 +33,6 @@ pub struct Publisher {
 
 impl Publisher {
     pub async fn publish(mut self) -> Result<(), Error> {
-        let mut handle_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
         let handlebars = Handlebars::new();
 
         let sfdc_client = crate::client::Builder::new()
@@ -40,50 +48,72 @@ impl Publisher {
             .build()
             .map_err(Error::FlowgenSalesforcePubSub)?;
 
+        let pubsub = Arc::new(Mutex::new(pubsub));
+
+        let topic_info = pubsub
+            .lock()
+            .await
+            .get_topic(TopicRequest {
+                topic_name: self.config.topic.clone(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+
+        let schema_info = pubsub
+            .lock()
+            .await
+            .get_schema(SchemaRequest {
+                schema_id: topic_info.schema_id,
+            })
+            .await
+            .unwrap()
+            .into_inner();
+
+        let pubsub = pubsub.clone();
         tokio::spawn(async move {
-            while let Ok(e) = self.rx.recv().await {
-                if e.current_task_id == Some(self.current_task_id - 1) {
-                    println!("{:?}", e);
-                    // let mut data = HashMap::new();
+            let topic_name = &self.config.topic;
+            let schema_id = &schema_info.schema_id;
+            while let Ok(event) = self.rx.recv().await {
+                if event.current_task_id == Some(self.current_task_id - 1) {
+                    let mut data = HashMap::new();
                     if let Some(inputs) = &self.config.inputs {
                         for (key, input) in inputs {
-                            if !input.is_static && !input.is_extension {
-                                let array: MapArray = e
-                                    .data
-                                    .column_by_name(&input.value)
-                                    .unwrap()
-                                    .to_data()
-                                    .into();
-
-                                let keys = array.keys();
-                                println!("{:?}", keys);
-                                let entries = array.entries();
-                                println!("{:?}", array.value(0).column_by_name("values"));
-                                // for data in array.iter().flatten() {
-                                //     if let Some(nested_inputs) = &input.inputs {
-                                //         for (key, input) in nested_inputs {
-                                //             let array: StringArray = data
-                                //                 .column_by_name(&input.value)
-                                //                 .unwrap()
-                                //                 .to_data()
-                                //                 .into();
-                                //             println!("{:?}", array);
-                                //         }
-                                //     }
-                                // }
-                                // for item in (&array).into_iter().flatten() {
-                                //     data.insert(key.to_string(), item.to_string());
-                                // }
+                            let value = input.extract_from(&event.data, &event.extensions);
+                            if let Ok(value) = value {
+                                data.insert(key.to_string(), value.to_string());
                             }
                         }
                     }
 
-                    // let serialized_payload = serde_json::to_string(&self.config.payload).unwrap();
-                    // let payload = handlebars
-                    //     .render_template(&serialized_payload, &data)
-                    //     .unwrap();
+                    let template = serde_json::to_string(&self.config.payload).unwrap();
+                    let payload = handlebars.render_template(&template, &data).unwrap();
+                    let value = serde_json::Value::from_str(&payload).unwrap();
 
-                    // println!("{:?}", payload);
+                    let mut bytes: Vec<u8> = Vec::new();
+                    serde_json::to_writer(&mut bytes, &value).unwrap();
+
+                    let mut events = Vec::new();
+                    let pe = ProducerEvent {
+                        schema_id: schema_id.to_string(),
+                        payload: bytes,
+                        ..Default::default()
+                    };
+
+                    println!("{:?}", value);
+
+                    events.push(pe);
+                    let test = pubsub
+                        .lock()
+                        .await
+                        .publish(PublishRequest {
+                            topic_name: topic_name.to_string(),
+                            events,
+                            ..Default::default()
+                        })
+                        .await
+                        .unwrap();
+                    println!("{:?}", test);
                 }
             }
         });

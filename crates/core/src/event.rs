@@ -1,9 +1,8 @@
 use arrow::{
-    array::{self, Array, MapArray, MapBuilder, RecordBatch, StringArray, StringBuilder},
+    array::{Array, MapBuilder, RecordBatch, StringArray, StringBuilder},
     datatypes::{DataType, Field, Fields},
-    ipc::Utf8,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -11,7 +10,7 @@ pub enum Error {
     Arrow(#[source] arrow::error::ArrowError),
     #[error("Provided value is not an object.")]
     NotObject(),
-    #[error("Missing required event attrubute.")]
+    #[error("Missing required attributes.")]
     MissingRequiredAttribute(String),
 }
 
@@ -20,7 +19,7 @@ pub struct Event {
     pub data: arrow::array::RecordBatch,
     pub subject: String,
     pub current_task_id: Option<usize>,
-    pub extensions: HashMap<String, String>,
+    pub extensions: Option<arrow::array::RecordBatch>,
 }
 
 #[derive(PartialEq, Debug, Clone, Default)]
@@ -28,7 +27,7 @@ pub struct EventBuilder {
     pub data: Option<arrow::array::RecordBatch>,
     pub subject: Option<String>,
     pub current_task_id: Option<usize>,
-    pub extensions: HashMap<String, String>,
+    pub extensions: Option<arrow::array::RecordBatch>,
 }
 
 impl EventBuilder {
@@ -49,8 +48,8 @@ impl EventBuilder {
         self.current_task_id = Some(current_task_id);
         self
     }
-    pub fn extensions(mut self, extensions: HashMap<String, String>) -> Self {
-        self.extensions = extensions;
+    pub fn extensions(mut self, extensions: arrow::array::RecordBatch) -> Self {
+        self.extensions = Some(extensions);
         self
     }
     pub fn build(self) -> Result<Event, Error> {
@@ -62,17 +61,17 @@ impl EventBuilder {
                 .subject
                 .ok_or_else(|| Error::MissingRequiredAttribute("subject".to_string()))?,
             current_task_id: self.current_task_id,
-            extensions: Default::default(),
+            extensions: self.extensions,
         })
     }
 }
 
-pub trait RecordBatchExt {
+pub trait SerdeValueExt {
     type Error;
     fn to_recordbatch(&self) -> Result<arrow::array::RecordBatch, Self::Error>;
 }
 
-impl RecordBatchExt for serde_json::Value {
+impl SerdeValueExt for serde_json::Value {
     type Error = Error;
     fn to_recordbatch(&self) -> Result<arrow::array::RecordBatch, Self::Error> {
         let map = self.as_object().ok_or_else(Error::NotObject)?;
@@ -87,14 +86,15 @@ impl RecordBatchExt for serde_json::Value {
                 columns.push(Arc::new(array));
             }
             if value.is_object() {
+                let map = self.as_object().ok_or_else(Error::NotObject)?;
                 fields.push(Field::new(
                     key,
                     DataType::Map(
                         Arc::new(Field::new(
                             "entries",
                             DataType::Struct(Fields::from(vec![
-                                Field::new("key", DataType::Utf8, false),
-                                Field::new("value", DataType::Utf8, true),
+                                Field::new("keys", DataType::Utf8, false),
+                                Field::new("values", DataType::Utf8, true),
                             ])),
                             false,
                         )),
@@ -105,12 +105,13 @@ impl RecordBatchExt for serde_json::Value {
                 let key_builder = StringBuilder::new();
                 let value_builder = StringBuilder::new();
                 let mut builder = MapBuilder::new(None, key_builder, value_builder);
-                for (key, value) in value.as_object().unwrap() {
+
+                for (key, value) in map {
                     builder.keys().append_value(key);
                     builder
                         .values()
                         .append_value(value.to_string().trim_matches('"'));
-                    builder.append(true).unwrap();
+                    builder.append(true).map_err(Error::Arrow)?;
                 }
                 let array = builder.finish();
                 columns.push(Arc::new(array));

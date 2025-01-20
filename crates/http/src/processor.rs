@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use arrow::array::StringArray;
-use flowgen_core::event::{Event, EventBuilder, RecordBatchExt};
+use flowgen_core::event::{Event, EventBuilder, SerdeValueExt};
 use futures_util::future::TryJoinAll;
 use handlebars::Handlebars;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tokio::{
     fs,
     sync::broadcast::{Receiver, Sender},
@@ -80,13 +81,13 @@ impl Builder {
             .unwrap();
 
         let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-            while let Ok(e) = self.rx.recv().await {
-                if e.current_task_id == Some(self.current_task_id - 1) {
-                    let mut data = HashMap::new();
+            while let Ok(event) = self.rx.recv().await {
+                if event.current_task_id == Some(self.current_task_id - 1) {
+                    let mut data = Map::new();
                     if let Some(inputs) = &self.config.inputs {
                         for (key, input) in inputs {
                             if !input.is_static && !input.is_extension {
-                                let array: StringArray = e
+                                let array: StringArray = event
                                     .data
                                     .column_by_name(&input.value)
                                     .unwrap()
@@ -94,7 +95,7 @@ impl Builder {
                                     .into();
 
                                 for item in (&array).into_iter().flatten() {
-                                    data.insert(key.to_string(), item.to_string());
+                                    data.insert(key.to_string(), Value::String(item.to_string()));
                                 }
                             }
                         }
@@ -125,15 +126,15 @@ impl Builder {
                     };
 
                     let resp: serde_json::Value = serde_json::from_str(&text_resp).unwrap();
-
                     let record_batch: arrow::array::RecordBatch = resp.to_recordbatch().unwrap();
+                    let extensions = Value::Object(data).to_recordbatch().unwrap();
                     let subject = "http.respone.out".to_string();
 
                     let e = EventBuilder::new()
                         .data(record_batch)
+                        .extensions(extensions)
                         .subject(subject)
                         .current_task_id(self.current_task_id)
-                        .extensions(data)
                         .build()
                         .map_err(Error::FlowgenEvent)?;
 
