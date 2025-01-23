@@ -89,7 +89,7 @@ impl Builder {
                     let mut data = Map::new();
                     if let Some(inputs) = &self.config.inputs {
                         for (key, input) in inputs {
-                            let value = input.extract_from(&event.data, &event.extensions);
+                            let value = input.extract(&event.data, &event.extensions);
                             if let Ok(value) = value {
                                 data.insert(key.to_string(), Value::String(value.to_string()));
                             }
@@ -97,6 +97,7 @@ impl Builder {
                     }
 
                     let endpoint = self.config.endpoint.render(&data).map_err(Error::Render)?;
+                    println!("{:?}", endpoint);
 
                     let client = client.get(endpoint);
                     let mut resp = String::new();
@@ -119,6 +120,7 @@ impl Builder {
                     };
 
                     let record_batch = resp.to_recordbatch().unwrap();
+                    println!("{:?}", data);
                     let extensions = Value::Object(data).to_recordbatch().unwrap();
                     let subject = "http.respone.out".to_string();
 

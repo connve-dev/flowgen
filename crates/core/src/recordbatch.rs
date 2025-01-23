@@ -28,6 +28,7 @@ impl RecordBatchExt for String {
             .unwrap()
             .unwrap();
 
+        println!("{:?}", record_batch);
         Ok(record_batch)
     }
 }

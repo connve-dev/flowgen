@@ -78,14 +78,13 @@ impl flowgen_core::publisher::Publisher for Publisher {
                 let mut data = Map::new();
                 if let Some(inputs) = &self.config.inputs {
                     for (key, input) in inputs {
-                        let value = input.extract_from(&event.data, &event.extensions);
+                        let value = input.extract(&event.data, &event.extensions);
                         if let Ok(value) = value {
                             data.insert(key.to_string(), Value::String(value.to_string()));
                         }
                     }
                 }
 
-                println!("{:?}", data);
                 let payload = self
                     .config
                     .payload
