@@ -31,7 +31,7 @@ pub enum Error {
     #[error("There was an error with Flowgen Nats JetStream Event.")]
     FlowgenNatsJetStreamEventError(#[source] flowgen_nats::jetstream::message::Error),
     #[error("There was an error with Flowgen File Subscriber.")]
-    FlowgenFileSubscriberError(#[source] flowgen_file::subscriber::Error),
+    FlowgenFileSubscriberError(#[source] flowgen_file::subscriber::SubscriberError),
     #[error("Failed to publish message to Nats Jetstream.")]
     NatsPublish(#[source] async_nats::jetstream::context::PublishError),
     #[error("Cannot execute async task.")]
