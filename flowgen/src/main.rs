@@ -55,8 +55,18 @@ async fn main() {
             }
         }
     }
-    let result = futures::future::join_all(all_handle_list).await;
-    for r in result {
-        let _ = r.unwrap();
+
+    for handle in all_handle_list {
+        let e = handle.await.unwrap();
+        if let Err(e) = e {
+            println!("{:?}", e);
+        }
     }
+    // let result = futures::future::try_join_all(all_handle_list).await;
+    // println!("{:?}", "here");
+    // for (i, r) in result.iter().enumerate() {
+    //     println!("{:?}", r);
+    //     println!("{:?}", i);
+    //     // let _ = r.unwrap();
+    // }
 }

@@ -88,13 +88,27 @@ impl Flow {
                 },
                 Task::processor(processor) => match processor {
                     config::Processor::http(config) => {
-                        flowgen_http::processor::Builder::new(config.clone(), &tx, i)
-                            .build()
-                            .await
-                            .map_err(Error::HttpProcessorError)?
-                            .process()
-                            .await
-                            .map_err(Error::HttpProcessorError)?
+                        let config = Arc::new(config.to_owned());
+                        let rx = tx.subscribe();
+                        let tx = tx.clone();
+                        let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                            flowgen_http::processor::ProcessorBuilder::new()
+                                .config(config)
+                                .receiver(rx)
+                                // .sender(tx)
+                                .current_task_id(i)
+                                .build()
+                                .await
+                                .map_err(Error::HttpProcessorError)?
+                                .process()
+                                .await
+                                .map_err(Error::HttpProcessorError)?;
+
+                            Ok(())
+                        });
+                        // let err = handle.await.unwrap_err();
+                        // println!("{:?}", err);
+                        handle_list.push(handle);
                     }
                 },
                 Task::target(target) => match target {

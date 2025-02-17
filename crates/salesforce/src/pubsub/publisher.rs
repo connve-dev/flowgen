@@ -104,7 +104,6 @@ impl flowgen_core::publisher::Publisher for Publisher {
                     .to_value()
                     .map_err(PublisherError::SerdeError)?;
 
-                println!("{:?}", payload);
                 let mut publish_payload: Map<String, Value> = Map::new();
                 for (k, v) in payload.as_object().unwrap() {
                     publish_payload.insert(k.to_owned(), v.to_owned());
@@ -134,7 +133,7 @@ impl flowgen_core::publisher::Publisher for Publisher {
                     .await
                     .map_err(PublisherError::SalesforcePubSubError)?;
 
-                println!("{:?}", resp);
+                // println!("{:?}", resp);
             }
         }
         Ok(())
@@ -178,14 +177,14 @@ impl PublisherBuilder {
 
     pub async fn build(self) -> Result<Publisher, PublisherError> {
         Ok(Publisher {
-            service: self
-                .service
-                .ok_or_else(|| PublisherError::MissingRequiredAttributeError("data".to_string()))?,
+            service: self.service.ok_or_else(|| {
+                PublisherError::MissingRequiredAttributeError("service".to_string())
+            })?,
             config: self.config.ok_or_else(|| {
-                PublisherError::MissingRequiredAttributeError("subject".to_string())
+                PublisherError::MissingRequiredAttributeError("config".to_string())
             })?,
             rx: self.rx.ok_or_else(|| {
-                PublisherError::MissingRequiredAttributeError("subject".to_string())
+                PublisherError::MissingRequiredAttributeError("receiver".to_string())
             })?,
             current_task_id: self.current_task_id,
         })
