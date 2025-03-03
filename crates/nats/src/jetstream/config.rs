@@ -7,6 +7,7 @@ pub struct Source {
     pub subject: String,
     pub durable_name: String,
     pub batch_size: usize,
+    pub delay_secs: Option<u64>,
 }
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]

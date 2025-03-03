@@ -2,8 +2,8 @@ use super::message::NatsMessageExt;
 use async_nats::jetstream::{self};
 use flowgen_core::{client::Client, event::Event};
 use futures_util::future::try_join_all;
-use std::sync::Arc;
-use tokio::{sync::broadcast::Sender, task::JoinHandle};
+use std::{sync::Arc, time::Duration};
+use tokio::{sync::broadcast::Sender, task::JoinHandle, time::sleep};
 use tokio_stream::StreamExt;
 
 #[derive(thiserror::Error, Debug)]
@@ -12,14 +12,22 @@ pub enum Error {
     NatsClient(#[source] crate::client::Error),
     #[error("error with NATS JetStream Message")]
     NatsJetStreamMessage(#[source] crate::jetstream::message::Error),
+    #[error("error with NATS JetStream durable consumer")]
+    NatsJetStreamConsumer(#[source] async_nats::jetstream::stream::ConsumerError),
+    #[error("error with NATS JetStream")]
+    NatsJetStream(#[source] async_nats::jetstream::consumer::StreamError),
+    #[error("error getting NATS JetStream")]
+    NatsJetStreamGetStream(#[source] async_nats::jetstream::context::GetStreamError),
     #[error("error subscriging to NATS subject")]
     NatsSubscribe(#[source] async_nats::SubscribeError),
     #[error("error executing async task")]
     TaskJoin(#[source] tokio::task::JoinError),
     #[error("error with sending message over channel")]
     SendMessage(#[source] tokio::sync::broadcast::error::SendError<Event>),
-    #[error("missing required attrubute")]
+    #[error("missing required attribute")]
     MissingRequiredAttribute(String),
+    #[error("other error with subscriber")]
+    Other(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 pub struct Subscriber {
@@ -45,7 +53,7 @@ impl Subscriber {
                 let consumer = jetstream
                     .get_stream(self.config.stream.clone())
                     .await
-                    .unwrap()
+                    .map_err(Error::NatsJetStreamGetStream)?
                     .get_or_create_consumer(
                         &self.config.durable_name,
                         jetstream::consumer::pull::Config {
@@ -54,22 +62,28 @@ impl Subscriber {
                         },
                     )
                     .await
-                    .unwrap();
+                    .map_err(Error::NatsJetStreamConsumer)?;
 
-                let mut messages = consumer
-                    .messages()
-                    .await
-                    .unwrap()
-                    .take(self.config.batch_size);
+                loop {
+                    let mut stream = consumer
+                        .messages()
+                        .await
+                        .map_err(Error::NatsJetStream)?
+                        .take(self.config.batch_size);
 
-                while let Some(message) = messages.next().await {
-                    if let Ok(message) = message {
-                        let mut e = message.to_event().map_err(Error::NatsJetStreamMessage)?;
-                        e.current_task_id = Some(self.current_task_id);
-                        self.tx.send(e).map_err(Error::SendMessage)?;
+                    while let Some(message) = stream.next().await {
+                        if let Ok(message) = message {
+                            let mut e = message.to_event().map_err(Error::NatsJetStreamMessage)?;
+                            message.ack().await.map_err(Error::Other)?;
+                            e.current_task_id = Some(self.current_task_id);
+                            self.tx.send(e).map_err(Error::SendMessage)?;
+                        }
+                    }
+
+                    if let Some(delay_secs) = self.config.delay_secs {
+                        sleep(Duration::from_secs(delay_secs)).await;
                     }
                 }
-                Ok(())
             });
             handle_list.push(handle);
         }
