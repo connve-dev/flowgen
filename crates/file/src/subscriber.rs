@@ -60,7 +60,6 @@ impl Subscriber {
     }
 }
 
-/// A builder of the file reader.
 pub struct SubscriberBuilder {
     config: super::config::Source,
     tx: Sender<Event>,
@@ -68,7 +67,6 @@ pub struct SubscriberBuilder {
 }
 
 impl SubscriberBuilder {
-    /// Creates a new instance of a Builder.
     pub fn new(
         config: super::config::Source,
         tx: &Sender<Event>,

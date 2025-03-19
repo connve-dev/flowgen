@@ -26,6 +26,8 @@ pub enum Error {
     NatsJetStreamSubscriber(#[source] flowgen_nats::jetstream::subscriber::Error),
     #[error("error with file subscriber")]
     FileSubscriber(#[source] flowgen_file::subscriber::Error),
+    #[error("error with file publisher")]
+    FilePublisher(#[source] flowgen_file::publisher::Error),
     #[error("error with generate subscriber")]
     GenerateSubscriber(#[source] flowgen_generate::subscriber::Error),
 }
@@ -125,6 +127,24 @@ impl Flow {
                     }
                 },
                 Task::target(target) => match target {
+                    config::Target::file(config) => {
+                        let config = Arc::new(config.to_owned());
+                        let rx = tx.subscribe();
+                        let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                            flowgen_file::publisher::PublisherBuilder::new()
+                                .config(config)
+                                .receiver(rx)
+                                .current_task_id(i)
+                                .build()
+                                .await
+                                .map_err(Error::FilePublisher)?
+                                .publish()
+                                .await
+                                .map_err(Error::FilePublisher)?;
+                            Ok(())
+                        });
+                        handle_list.push(handle);
+                    }
                     config::Target::nats_jetstream(config) => {
                         let config = Arc::new(config.to_owned());
                         let rx = tx.subscribe();

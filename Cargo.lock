@@ -2115,25 +2115,14 @@ name = "flowgen_file"
 version = "0.0.1"
 dependencies = [
  "arrow 54.0.0",
- "async-nats",
- "bincode",
- "bytes",
  "chrono",
  "flowgen_core",
  "futures",
- "futures-util",
- "oauth2",
- "prost 0.12.6",
- "prost-types",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
- "tokio-stream",
- "tokio-util",
- "tonic",
- "tonic-build",
- "url",
+ "tracing",
 ]
 
 [[package]]

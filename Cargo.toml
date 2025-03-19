@@ -20,4 +20,6 @@ serde_json = { version = "1.0.111" }
 tokio = { version = "1.35.1" }
 thiserror = { version = "1.0.63" }
 futures-util = { version = "0.3.30" }
+futures = { version = "0.3.30" }
+arrow = { version = "54.0.0" }
 reqwest = { version = "0.12.11" }
