@@ -12,9 +12,9 @@ name = "flowgen_generate"
 path = "src/lib.rs"
 
 [dependencies]
+flowgen_core = { path = "../core" }
 tokio = { workspace = true }
 thiserror = { workspace = true }
-flowgen_core = { path = "../core" }
 chrono = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
