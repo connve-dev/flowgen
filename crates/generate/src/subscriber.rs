@@ -3,17 +3,11 @@ use flowgen_core::{
     event::{Event, EventBuilder},
     recordbatch::RecordBatchExt,
 };
-use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::broadcast::Sender, time};
 use tracing::{event, Level};
 
 const DEFAULT_MESSAGE_SUBJECT: &str = "generate.out";
-
-#[derive(Deserialize, Serialize)]
-struct Credentials {
-    bearer_auth: Option<String>,
-}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -40,7 +34,15 @@ impl Subscriber {
             counter += 1;
 
             let timestamp = Utc::now().timestamp_micros();
-            let subject = format!("{}.{}", DEFAULT_MESSAGE_SUBJECT, timestamp);
+            let subject = match &self.config.label {
+                Some(label) => format!(
+                    "{}.{}.{}",
+                    DEFAULT_MESSAGE_SUBJECT,
+                    label.to_lowercase(),
+                    timestamp
+                ),
+                None => format!("{}.{}", DEFAULT_MESSAGE_SUBJECT, timestamp),
+            };
 
             let recordbatch = self.config.message.to_recordbatch().unwrap();
 
@@ -54,10 +56,9 @@ impl Subscriber {
             event!(Level::INFO, "event processed: {}", e.subject);
             self.tx.send(e).map_err(Error::SendMessage)?;
 
-            if let Some(count) = self.config.count {
-                if count == counter {
-                    break;
-                }
+            match self.config.count {
+                Some(count) if count == counter => break,
+                Some(_) | None => continue,
             }
         }
 
