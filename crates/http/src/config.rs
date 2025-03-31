@@ -4,12 +4,13 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 
 /// A configuration options for the http processor.
+///
 /// Example:
 /// ```json
 /// {
 ///     "processor": {
 ///         "http": {
-///             "label": "name_of_the_processor",
+///             "label": "example",
 ///             "method": "POST",
 ///             "endpoint": "https://example.com",
 ///             "payload": {
