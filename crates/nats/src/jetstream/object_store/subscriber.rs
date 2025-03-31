@@ -17,34 +17,10 @@ const DEFAULT_HAS_HEADER: bool = true;
 pub enum Error {
     #[error("error authorizating to NATS client")]
     NatsClient(#[source] crate::client::Error),
-    #[error("error with NATS JetStream Message")]
-    NatsJetStreamMessage(#[source] crate::jetstream::message::Error),
-    #[error("error with NATS JetStream durable consumer")]
-    NatsJetStreamConsumer(#[source] async_nats::jetstream::stream::ConsumerError),
-    #[error("error with NATS JetStream")]
-    NatsJetStream(#[source] async_nats::jetstream::consumer::StreamError),
-    #[error("error getting NATS JetStream")]
-    NatsJetStreamGetStream(#[source] async_nats::jetstream::context::GetStreamError),
-    #[error("error subscriging to NATS subject")]
-    NatsSubscribe(#[source] async_nats::SubscribeError),
-    #[error("error executing async task")]
-    TaskJoin(#[source] tokio::task::JoinError),
-    #[error("error with sending message over channel")]
-    SendMessage(#[source] tokio::sync::broadcast::error::SendError<Event>),
     #[error("missing required attribute")]
     MissingRequiredAttribute(String),
-    #[error("other error with subscriber")]
-    Other(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("failed to get nats bucket")]
     NatsObjectStoreBucketError(#[source] async_nats::error::Error<ObjectStoreErrorKind>),
-    #[error("failed to get nats bucket")]
-    NatsObjectStoreFileError(#[source] async_nats::error::Error<GetErrorKind>),
-    #[error("failed to open file")]
-    FileOpenError(#[source] std::io::Error),
-    #[error("failed to read file")]
-    CSVFileReadError(#[source] std::string::FromUtf8Error),
-    #[error("failed to loop file")]
-    CSVLoopError(#[source] csv::Error),
     #[error("error deserializing data into binary format")]
     Arrow(#[source] arrow::error::ArrowError),
     #[error("error reading file")]
@@ -53,6 +29,8 @@ pub enum Error {
     NatsObjectStoreWatchError(#[source] async_nats::jetstream::object_store::WatchError),
     #[error("error constructing Flowgen Event")]
     Event(#[source] flowgen_core::stream::event::Error),
+    #[error("failed to get nats bucket")]
+    NatsObjectStoreFileError(#[source] async_nats::error::Error<GetErrorKind>),
 }
 
 pub struct Subscriber {
@@ -72,7 +50,6 @@ impl Subscriber {
             .map_err(Error::NatsClient)?;
 
         if let Some(jetstream) = client.jetstream {
-            // let bucket_name = self.config.input_bucket.clone();
             let bucket = jetstream.get_object_store(&self.config.input_bucket).await.map_err(Error::NatsObjectStoreBucketError)?;
             let mut objects_stream = bucket
                 .list()
@@ -100,7 +77,6 @@ impl Subscriber {
                     .with_header(true)
                     .infer_schema(&mut buffer.as_slice(), Some(100))
                     .map_err(Error::Arrow)?;
-                // buffer.rewind().map_err(Error::IO)?;
 
                 let csv = ReaderBuilder::new(Arc::new(schema.clone()))
                     .with_header(DEFAULT_HAS_HEADER)

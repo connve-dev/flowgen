@@ -5,8 +5,8 @@ use arrow::{
 use chrono::Utc;
 use async_nats::jetstream::object_store::Config;
 use std::sync::Arc;
-use tokio::{sync::broadcast::Sender, task::JoinHandle};
-use flowgen_core::{connect::client::Client, stream::event::Event};
+use tokio::task::JoinHandle;
+use flowgen_core::connect::client::Client;
 
 const DEFAULT_FILE_NAME: &str = "no_file_name";
 
@@ -16,10 +16,6 @@ pub enum Error {
     IO(#[source] std::io::Error),
     #[error("error deserializing data into binary format")]
     Arrow(#[source] arrow::error::ArrowError),
-    #[error("error with sending message over channel")]
-    SendMessage(#[source] tokio::sync::broadcast::error::SendError<Event>),
-    #[error("error constructing Flowgen Event")]
-    Event(#[source] flowgen_core::stream::event::Error),
     #[error("missing required event attrubute")]
     MissingRequiredAttribute(String),
     #[error("error authorizating to NATS client")]
