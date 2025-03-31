@@ -7,7 +7,7 @@ use futures_util::future::try_join_all;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::sync::Arc;
+use std::{rc::Rc, sync::Arc};
 use tokio::{
     fs,
     sync::broadcast::{Receiver, Sender},
@@ -191,7 +191,9 @@ impl Processor {
                         ),
                         None => format!("{}.{}", DEFAULT_MESSAGE_SUBJECT, timestamp),
                     };
+                    let event_message = format!("event processed: {}", subject);
 
+                    // Send processor output as event.
                     let e = EventBuilder::new()
                         .data(recordbatch)
                         .extensions(extensions)
@@ -200,8 +202,8 @@ impl Processor {
                         .build()
                         .map_err(Error::Event)?;
 
-                    event!(Level::INFO, "event processed: {}", e.subject);
                     tx.send(e).map_err(Error::SendMessage)?;
+                    event!(Level::INFO, "{}", event_message);
                 }
                 Ok(())
             });
