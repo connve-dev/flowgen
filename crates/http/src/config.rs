@@ -8,7 +8,6 @@ use std::collections::HashMap;
 /// Example:
 /// ```json
 /// {
-///     "processor": {
 ///         "http": {
 ///             "label": "example",
 ///             "method": "POST",
@@ -27,7 +26,6 @@ use std::collections::HashMap;
 ///                   }
 ///               }
 ///          }
-///      }
 /// }
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]

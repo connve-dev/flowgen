@@ -27,14 +27,14 @@ pub enum Error {
 }
 
 pub struct Publisher {
-    config: Arc<super::config::Target>,
+    config: Arc<super::config::Publisher>,
     rx: Receiver<Event>,
     current_task_id: usize,
 }
 
-impl flowgen_core::stream::publisher::Publisher for Publisher {
+impl flowgen_core::task::runner::Runner for Publisher {
     type Error = Error;
-    async fn publish(mut self) -> Result<(), Self::Error> {
+    async fn run(mut self) -> Result<(), Self::Error> {
         let client = crate::client::ClientBuilder::new()
             .credentials_path(self.config.credentials.clone().into())
             .build()
@@ -110,7 +110,7 @@ impl flowgen_core::stream::publisher::Publisher for Publisher {
 
 #[derive(Default)]
 pub struct PublisherBuilder {
-    config: Option<Arc<super::config::Target>>,
+    config: Option<Arc<super::config::Publisher>>,
     rx: Option<Receiver<Event>>,
     current_task_id: usize,
 }
@@ -122,7 +122,7 @@ impl PublisherBuilder {
         }
     }
 
-    pub fn config(mut self, config: Arc<super::config::Target>) -> Self {
+    pub fn config(mut self, config: Arc<super::config::Publisher>) -> Self {
         self.config = Some(config);
         self
     }

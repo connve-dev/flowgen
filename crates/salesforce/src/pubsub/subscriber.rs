@@ -45,13 +45,14 @@ pub enum Error {
 }
 
 pub struct Subscriber {
-    config: Arc<super::config::Source>,
+    config: Arc<super::config::Subscriber>,
     tx: Sender<Event>,
     current_task_id: usize,
 }
 
-impl Subscriber {
-    pub async fn subscribe(self) -> Result<(), Error> {
+impl flowgen_core::task::runner::Runner for Subscriber {
+    type Error = Error;
+    async fn run(self) -> Result<(), Error> {
         let service = flowgen_core::connect::service::ServiceBuilder::new()
             .endpoint(format!("{0}:{1}", DEFAULT_PUBSUB_URI, DEFAULT_PUBSUB_PORT))
             .build()
@@ -176,7 +177,7 @@ impl Subscriber {
 
 #[derive(Default)]
 pub struct SubscriberBuilder {
-    config: Option<Arc<super::config::Source>>,
+    config: Option<Arc<super::config::Subscriber>>,
     tx: Option<Sender<Event>>,
     current_task_id: usize,
 }
@@ -188,7 +189,7 @@ impl SubscriberBuilder {
         }
     }
 
-    pub fn config(mut self, config: Arc<super::config::Source>) -> Self {
+    pub fn config(mut self, config: Arc<super::config::Subscriber>) -> Self {
         self.config = Some(config);
         self
     }
