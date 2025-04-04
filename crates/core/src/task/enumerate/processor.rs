@@ -27,8 +27,9 @@ pub struct Processor {
     current_task_id: usize,
 }
 
-impl Processor {
-    pub async fn process(mut self) -> Result<(), Error> {
+impl crate::task::runner::Runner for Processor {
+    type Error = Error;
+    async fn run(mut self) -> Result<(), Error> {
         while let Ok(event) = self.rx.recv().await {
             if event.current_task_id == Some(self.current_task_id - 1) {
                 let data = self.config.array.extract(&event.data, &event.extensions);

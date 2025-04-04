@@ -3,7 +3,6 @@ pub mod config {
 }
 pub mod stream {
     pub mod event;
-    pub mod publisher;
 }
 pub mod convert {
     pub mod recordbatch;
@@ -15,6 +14,7 @@ pub mod connect {
     pub mod service;
 }
 pub mod task {
+    pub mod runner;
     pub mod enumerate {
         pub mod config;
         pub mod processor;

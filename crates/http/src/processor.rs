@@ -7,7 +7,7 @@ use futures_util::future::try_join_all;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 use tokio::{
     fs,
     sync::broadcast::{Receiver, Sender},
@@ -70,8 +70,9 @@ pub struct Processor {
     current_task_id: usize,
 }
 
-impl Processor {
-    pub async fn process(mut self) -> Result<(), Error> {
+impl flowgen_core::task::runner::Runner for Processor {
+    type Error = Error;
+    async fn run(mut self) -> Result<(), Error> {
         let mut handle_list = Vec::new();
 
         let client = reqwest::ClientBuilder::new()
@@ -130,6 +131,7 @@ impl Processor {
                             None => match &payload.input {
                                 Some(input) => {
                                     let key = input.replace("{{", "").replace("}}", "");
+
                                     let json_string = data.get(&key).ok_or_else(Error::NotFound)?;
                                     serde_json::from_str::<serde_json::Value>(
                                         json_string.as_str().ok_or_else(Error::ParseJson)?,
