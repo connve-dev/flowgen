@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
-pub struct Source {
+pub struct Subscriber {
     pub credentials: String,
     pub stream: String,
     pub subject: String,
@@ -11,7 +11,7 @@ pub struct Source {
 }
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
-pub struct Target {
+pub struct Publisher {
     pub credentials: String,
     pub stream: String,
     pub stream_description: Option<String>,

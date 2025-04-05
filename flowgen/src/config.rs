@@ -12,33 +12,14 @@ pub struct Flow {
 #[derive(PartialEq, Clone, Debug, Deserialize, Serialize)]
 #[allow(non_camel_case_types)]
 pub enum Task {
-    source(Source),
-    processor(Processor),
-    target(Target),
-}
-
-#[derive(PartialEq, Clone, Debug, Deserialize, Serialize)]
-#[allow(non_camel_case_types)]
-pub enum Source {
-    file(flowgen_file::config::Source),
-    salesforce_pubsub(flowgen_salesforce::pubsub::config::Source),
-    nats_jetstream(flowgen_nats::jetstream::config::Source),
-    generate(flowgen_core::task::generate::config::Source),
-    object_store(flowgen_nats::jetstream::object_store::config::Source),
-}
-
-#[derive(PartialEq, Clone, Debug, Deserialize, Serialize)]
-#[allow(non_camel_case_types, clippy::large_enum_variant)]
-pub enum Processor {
-    http(flowgen_http::config::Processor),
     enumerate(flowgen_core::task::enumerate::config::Processor),
-}
-
-#[derive(PartialEq, Clone, Debug, Deserialize, Serialize)]
-#[allow(non_camel_case_types)]
-pub enum Target {
-    file(flowgen_file::config::Target),
-    nats_jetstream(flowgen_nats::jetstream::config::Target),
-    deltalake(flowgen_deltalake::config::Target),
-    salesforce_pubsub(flowgen_salesforce::pubsub::config::Target),
+    file_subscriber(flowgen_file::config::Subscriber),
+    file_publisher(flowgen_file::config::Publisher),
+    generate(flowgen_core::task::generate::config::Subscriber),
+    http(flowgen_http::config::Processor),
+    nats_jetstream_subscriber(flowgen_nats::jetstream::config::Subscriber),
+    nats_jetstream_publisher(flowgen_nats::jetstream::config::Publisher),
+    salesforce_pubsub_subscriber(flowgen_salesforce::pubsub::config::Subscriber),
+    salesforce_pubsub_publisher(flowgen_salesforce::pubsub::config::Publisher),
+    object_store_subscriber(flowgen_nats::jetstream::object_store::config::Source),
 }
