@@ -100,7 +100,7 @@ impl flowgen_core::task::runner::Runner for Publisher {
                         .await
                         .map_err(Error::NatsPublish)?;
 
-                    event!(Level::INFO, "event published: {}", e.subject);
+                    event!(Level::INFO, "event processed: {}", e.subject);
                 }
             }
         }

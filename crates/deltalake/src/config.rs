@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
-pub struct Target {
+pub struct Writer {
     pub credentials: String,
-    pub uri: String,
+    pub path: PathBuf,
 }

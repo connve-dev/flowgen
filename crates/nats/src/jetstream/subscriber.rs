@@ -80,7 +80,7 @@ impl flowgen_core::task::runner::Runner for Subscriber {
                         message.ack().await.map_err(Error::Other)?;
                         e.current_task_id = Some(self.current_task_id);
 
-                        event!(Level::INFO, "event received: {}", e.subject);
+                        event!(Level::INFO, "event processed: {}", e.subject);
                         self.tx.send(e).map_err(Error::SendMessage)?;
                     }
                 }

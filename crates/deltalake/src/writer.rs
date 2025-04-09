@@ -1,0 +1,163 @@
+use chrono::Utc;
+use deltalake::{
+    kernel::{DataType, PrimitiveType, StructField},
+    parquet::{
+        basic::{Compression, ZstdLevel},
+        file::properties::WriterProperties,
+    },
+    writer::{DeltaWriter, RecordBatchWriter},
+    DeltaOps,
+};
+use flowgen_core::stream::event::Event;
+use futures_util::future::try_join_all;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::{
+    sync::{broadcast::Receiver, Mutex},
+    task::JoinHandle,
+};
+use tracing::{event, Level};
+
+const DEFAULT_MESSAGE_SUBJECT: &str = "deltalake.writer";
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("error with processing Parquet file")]
+    Parquet(#[source] deltalake::parquet::errors::ParquetError),
+    #[error("error with processing DeltaTable")]
+    DeltaTable(#[source] deltalake::DeltaTableError),
+    #[error("missing required event attrubute")]
+    MissingRequiredAttribute(String),
+    #[error("missing required config value path")]
+    MissingPath(),
+    #[error("no filename in provided path")]
+    EmptyFileName(),
+    #[error("no value in provided str")]
+    EmptyStr(),
+}
+
+pub struct Writer {
+    config: Arc<super::config::Writer>,
+    rx: Receiver<Event>,
+    current_task_id: usize,
+}
+
+impl flowgen_core::task::runner::Runner for Writer {
+    type Error = Error;
+    async fn run(mut self) -> Result<(), Error> {
+        let mut handle_list = Vec::new();
+        deltalake_gcp::register_handlers(None);
+        let mut storage_options = HashMap::new();
+        storage_options.insert(
+            "google_service_account".to_string(),
+            self.config.credentials.clone(),
+        );
+
+        let path = self.config.path.to_str().ok_or_else(Error::MissingPath)?;
+
+        let table =
+            match deltalake::open_table_with_storage_options(path, storage_options.clone()).await {
+                Ok(table) => table,
+                Err(_) => DeltaOps::try_from_uri_with_storage_options(&path, storage_options)
+                    .await
+                    .map_err(Error::DeltaTable)?
+                    .create()
+                    .with_columns(vec![StructField::new(
+                        "Id".to_string(),
+                        DataType::Primitive(PrimitiveType::String),
+                        true,
+                    )])
+                    .await
+                    .map_err(Error::DeltaTable)?,
+            };
+        let table = Arc::new(Mutex::new(table));
+
+        while let Ok(event) = self.rx.recv().await {
+            if event.current_task_id == Some(self.current_task_id - 1) {
+                let table = Arc::clone(&table);
+                let config = Arc::clone(&self.config);
+                let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let table = Arc::clone(&table);
+                    let mut table = table.lock().await;
+
+                    let writer_properties = WriterProperties::builder()
+                        .set_compression(Compression::ZSTD(
+                            ZstdLevel::try_new(3).map_err(Error::Parquet)?,
+                        ))
+                        .build();
+
+                    let mut writer = RecordBatchWriter::for_table(&table)
+                        .map_err(Error::DeltaTable)?
+                        .with_writer_properties(writer_properties);
+
+                    writer.write(event.data).await.map_err(Error::DeltaTable)?;
+                    writer
+                        .flush_and_commit(&mut table)
+                        .await
+                        .map_err(Error::DeltaTable)?;
+
+                    let file_stem = config
+                        .path
+                        .file_stem()
+                        .ok_or_else(Error::EmptyFileName)?
+                        .to_str()
+                        .ok_or_else(Error::EmptyStr)?
+                        .trim();
+
+                    let timestamp = Utc::now().timestamp_micros();
+                    let subject =
+                        format!("{}.{}.{}", DEFAULT_MESSAGE_SUBJECT, file_stem, timestamp);
+                    let event_message = format!("event processed: {}", subject);
+
+                    event!(Level::INFO, "{}", event_message);
+                    Ok(())
+                });
+                handle_list.push(handle);
+            }
+        }
+        let _ = try_join_all(handle_list.iter_mut()).await;
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct WriterBuilder {
+    config: Option<Arc<super::config::Writer>>,
+    rx: Option<Receiver<Event>>,
+    current_task_id: usize,
+}
+
+impl WriterBuilder {
+    pub fn new() -> WriterBuilder {
+        WriterBuilder {
+            ..Default::default()
+        }
+    }
+
+    pub fn config(mut self, config: Arc<super::config::Writer>) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    pub fn receiver(mut self, receiver: Receiver<Event>) -> Self {
+        self.rx = Some(receiver);
+        self
+    }
+
+    pub fn current_task_id(mut self, current_task_id: usize) -> Self {
+        self.current_task_id = current_task_id;
+        self
+    }
+
+    pub async fn build(self) -> Result<Writer, Error> {
+        Ok(Writer {
+            config: self
+                .config
+                .ok_or_else(|| Error::MissingRequiredAttribute("config".to_string()))?,
+            rx: self
+                .rx
+                .ok_or_else(|| Error::MissingRequiredAttribute("receiver".to_string()))?,
+            current_task_id: self.current_task_id,
+        })
+    }
+}

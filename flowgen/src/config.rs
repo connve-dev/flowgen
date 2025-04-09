@@ -12,6 +12,7 @@ pub struct Flow {
 #[derive(PartialEq, Clone, Debug, Deserialize, Serialize)]
 #[allow(non_camel_case_types)]
 pub enum Task {
+    deltalake_writer(flowgen_deltalake::config::Writer),
     enumerate(flowgen_core::task::enumerate::config::Processor),
     file_reader(flowgen_file::config::Reader),
     file_writer(flowgen_file::config::Writer),

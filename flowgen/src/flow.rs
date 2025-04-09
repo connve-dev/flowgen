@@ -10,6 +10,10 @@ use tokio::{
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("error writing data into Deltalake")]
+    DeltalakeWriter(#[source] flowgen_deltalake::writer::Error),
+    #[error("error processing element during enumaration")]
+    EnumerateProcessor(#[source] flowgen_core::task::enumerate::processor::Error),
     #[error("error reading a credentials file at path {1}")]
     OpenFile(#[source] std::io::Error, PathBuf),
     #[error("error parsing config file")]
@@ -20,8 +24,6 @@ pub enum Error {
     SalesforcePubsubPublisher(#[source] flowgen_salesforce::pubsub::publisher::Error),
     #[error("error processing http request")]
     HttpProcessor(#[source] flowgen_http::processor::Error),
-    #[error("error processing element during enumaration")]
-    EnumerateProcessor(#[source] flowgen_core::task::enumerate::processor::Error),
     #[error("error with NATS JetStream Publisher")]
     NatsJetStreamPublisher(#[source] flowgen_nats::jetstream::publisher::Error),
     #[error("error with NATS JetStream Subscriber")]
@@ -54,6 +56,25 @@ impl Flow {
 
         for (i, task) in config.flow.tasks.iter().enumerate() {
             match task {
+                Task::deltalake_writer(config) => {
+                    let config = Arc::new(config.to_owned());
+                    let rx = tx.subscribe();
+                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                        flowgen_deltalake::writer::WriterBuilder::new()
+                            .config(config)
+                            .receiver(rx)
+                            .current_task_id(i)
+                            .build()
+                            .await
+                            .map_err(Error::DeltalakeWriter)?
+                            .run()
+                            .await
+                            .map_err(Error::DeltalakeWriter)?;
+
+                        Ok(())
+                    });
+                    handle_list.push(handle);
+                }
                 Task::enumerate(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();

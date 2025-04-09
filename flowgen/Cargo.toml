@@ -38,5 +38,4 @@ thiserror = "1.0.63"
 futures = "0.3.30"
 chrono = "0.4.38"
 glob = "0.3.1"
-google-cloud-auth = { git = "https://github.com/googleapis/google-cloud-rust" }
-arrow = "53.3.0"
+arrow = { workspace = true }

@@ -153,7 +153,7 @@ impl flowgen_core::task::runner::Runner for Subscriber {
                                         .build()
                                         .map_err(Error::Event)?;
 
-                                    event!(Level::INFO, "event received: {}", e.subject);
+                                    event!(Level::INFO, "event processed: {}", e.subject);
                                     tx.send(e).map_err(Error::SendMessage)?;
                                 }
                             }

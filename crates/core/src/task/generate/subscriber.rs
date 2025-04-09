@@ -7,7 +7,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::broadcast::Sender, time};
 use tracing::{event, Level};
 
-const DEFAULT_MESSAGE_SUBJECT: &str = "generate.out";
+const DEFAULT_MESSAGE_SUBJECT: &str = "generate";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -54,7 +54,7 @@ impl crate::task::runner::Runner for Subscriber {
                 .build()
                 .map_err(Error::Event)?;
 
-            event!(Level::INFO, "event received: {}", e.subject);
+            event!(Level::INFO, "event processed: {}", e.subject);
             self.tx.send(e).map_err(Error::SendMessage)?;
 
             match self.config.count {

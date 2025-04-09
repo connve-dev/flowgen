@@ -9,7 +9,7 @@ use tokio::{
 };
 use tracing::{event, Level};
 
-const DEFAULT_MESSAGE_SUBJECT: &str = "file.in";
+const DEFAULT_MESSAGE_SUBJECT: &str = "file.reader";
 const DEFAULT_BATCH_SIZE: usize = 1000;
 const DEFAULT_HAS_HEADER: bool = true;
 
