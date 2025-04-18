@@ -66,7 +66,6 @@ impl Flow {
                             .receiver(rx)
                             .current_task_id(i)
                             .build()
-                            .await
                             .map_err(Error::DeltalakeWriter)?
                             .run()
                             .await

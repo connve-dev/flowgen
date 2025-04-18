@@ -313,8 +313,7 @@ impl WriterBuilder {
     /// # Returns
     /// * `Ok(Writer)` if construction is successful.
     /// * `Err(Error::MissingRequiredAttribute)` if `config` or `rx` was not provided.
-    pub async fn build(self) -> Result<Writer, Error> {
-        // Note: This build method is async but doesn't perform any async operations itself.
+    pub fn build(self) -> Result<Writer, Error> {
         Ok(Writer {
             config: self
                 .config
