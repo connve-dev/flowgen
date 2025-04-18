@@ -6,22 +6,27 @@ use std::path::PathBuf;
 /// This struct defines the necessary parameters to configure how data
 /// should be written to a target destination. It includes credentials,
 /// the target path, the write operation mode, an optional predicate
-/// for merge operations, and optional creation parameters if the
-/// target needs to be created.
+/// for merge operations, and parameters controlling optional target creation.
 ///
-/// # Example: Append Operation
+/// # Example: Append Operation (Implicitly No Creation)
+///
+/// Note: `create_options` is mandatory, but creation depends on its internal flags.
+/// Setting `create_if_not_exist: false` disables creation attempts.
 ///
 /// ```json
 /// {
 ///     "writer": {
 ///         "credentials": "my_secret_credentials",
 ///         "path": "/path/to/target/data",
-///         "operation": "Append"
+///         "operation": "Append",
+///         "create_options": {
+///             "create_if_not_exist": false
+///         }
 ///     }
 /// }
 /// ```
 ///
-/// # Example: Merge Operation with Creation Options
+/// # Example: Merge Operation with Creation Enabled
 ///
 /// ```json
 /// {
@@ -31,6 +36,7 @@ use std::path::PathBuf;
 ///         "operation": "Merge",
 ///         "predicate": "target.id = source.id",
 ///         "create_options": {
+///             "create_if_not_exist": true,
 ///             "columns": [
 ///                 {"name": "id", "data_type": "Utf8", "nullable": false},
 ///                 {"name": "value", "data_type": "Utf8", "nullable": true},
@@ -53,14 +59,14 @@ pub struct Writer {
     /// This string typically defines how source and target records are matched
     /// (e.g., `"target.id = source.id"`).
     pub predicate: Option<String>,
-    /// Optional parameters for creating the target resource (e.g., a table)
-    /// if it does not already exist. See `CreateOpts`.
+    /// Parameters controlling the optional creation of the target resource (e.g., a table)
+    /// if it does not already exist. See `CreateOptions`. Note that this field itself is mandatory.
     pub create_options: CreateOptions,
 }
 
 /// Defines the properties of a single column, typically used for schema definition.
 ///
-/// Part of `CreateOpts` to specify the structure of a target table or dataset
+/// Part of `CreateOptions` to specify the structure of a target table or dataset
 /// when it needs to be created.
 ///
 /// # Example:
@@ -110,16 +116,17 @@ pub enum Operation {
     // Overwrite, Upsert, etc.
 }
 
-/// Options specifically for creating the target resource if it doesn't exist.
+/// Options specifically controlling the creation of the target resource if it doesn't exist.
 ///
-/// Used within the `Writer` configuration when the operation might need
-/// to initialize the target structure (e.g., create a database table).
+/// Used within the `Writer` configuration to define if and how a target
+/// (e.g., a Delta table) should be created when it's not found at the specified path.
 ///
-/// # Example:
+/// # Example: Enable creation with specific columns
 ///
 /// ```json
 /// {
 ///     "create_options": {
+///         "create_if_not_exist": true,
 ///         "columns": [
 ///             {"name": "id", "data_type": "Utf8", "nullable": false},
 ///             {"name": "data", "data_type": "Utf8", "nullable": true}
@@ -127,10 +134,25 @@ pub enum Operation {
 ///     }
 /// }
 /// ```
+///
+/// # Example: Disable creation attempt
+///
+/// ```json
+/// {
+///     "create_options": {
+///         "create_if_not_exist": false
+///         // "columns" might be omitted or null here
+///     }
+/// }
+/// ```
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct CreateOptions {
-    /// A list of column definitions (`Column`) specifying the schema
-    /// of the target to be created.
+    /// Flag indicating whether the target resource should be created if it's not found.
+    /// If `false`, no creation attempt will be made even if `columns` are provided.
+    /// Defaults to `false` if not specified during deserialization (due to `Default` trait).
     pub create_if_not_exist: bool,
+    /// An optional list of column definitions (`Column`) specifying the schema
+    /// of the target to be created. This is required for creation if `create_if_not_exist` is `true`.
+    /// If `create_if_not_exist` is `true` but `columns` is `None` or empty, creation might fail or be skipped.
     pub columns: Option<Vec<Column>>,
 }
