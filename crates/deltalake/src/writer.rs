@@ -1,89 +1,166 @@
+//! # Delta Lake Writer Module.
+//!
+//! This module provides the core functionality for writing data streams asynchronously
+//! into a Delta Lake table. It acts as a task runner within the `flowgen_core` framework.
+//!
+//! ## Core Components:
+//! - `Writer`: The main runner struct that implements `flowgen_core::task::runner::Runner`.
+//!   It listens for `Event`s on a channel, manages a `Client` connection to Delta Lake,
+//!   and spawns `EventHandler` tasks.
+//! - `EventHandler`: Processes individual `Event`s, performing the actual write
+//!   (Append or Merge) operation to the Delta table based on the provided configuration.
+//! - `WriterBuilder`: A builder pattern implementation for constructing `Writer` instances.
+//! - `Error`: An enum defining all possible errors that can occur within this module.
+//!
+//! ## Workflow:
+//! 1. A `Writer` instance is created using `WriterBuilder`, configured with necessary
+//!    parameters like Delta table path, credentials, write operation, and an event channel receiver.
+//! 2. The `Writer::run` method is called (typically by the `flowgen_core` task execution framework).
+//! 3. `run` establishes a connection to the Delta Lake table using `super::client::Client`.
+//! 4. It enters a loop, receiving `Event`s from the channel.
+//! 5. For each valid event (matching `current_task_id`), it spawns a new asynchronous task
+//!    using `tokio::spawn` that runs `EventHandler::process`.
+//! 6. `EventHandler::process` acquires a lock on the shared `Client`, prepares the Delta Lake
+//!    operation (Append or Merge using DataFusion), executes it, and logs the outcome.
+//! 7. Errors during client connection or event processing are logged using the `tracing` crate.
+
 use chrono::Utc;
 use deltalake::{
-    datafusion::{
-        datasource::MemTable,
-        logical_expr::function::ExpressionArgs,
-        prelude::{col, lit, DataFrame, SessionContext},
-    },
+    datafusion::{datasource::MemTable, prelude::SessionContext},
     parquet::{
         basic::{Compression, ZstdLevel},
         file::properties::WriterProperties,
     },
     writer::{DeltaWriter, RecordBatchWriter},
-    DeltaOps, DeltaTable,
+    DeltaOps,
 };
-use flowgen_core::{connect::client::Client, stream::event::Event};
+use flowgen_core::{connect::client::Client as FlowgenClientTrait, stream::event::Event};
 use std::sync::Arc;
 use tokio::sync::{broadcast::Receiver, Mutex};
 use tracing::{error, event, Level};
 
+/// Base subject used for logging successful event processing messages.
 const DEFAULT_MESSAGE_SUBJECT: &str = "deltalake.writer";
+/// Default alias for the target DeltaTable in MERGE operations.
+const DEFAULT_TARGET_ALIAS: &str = "target";
+/// Default alias for the source data (in-memory table) in MERGE operations.
+const DEFAULT_SOURCE_ALIAS: &str = "source";
 
+/// Errors that can occur during the Delta Lake writing process.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Error originating from the Parquet library used by Delta Lake.
     #[error(transparent)]
     Parquet(#[from] deltalake::parquet::errors::ParquetError),
+    /// Error originating from the Delta Lake table operations.
     #[error(transparent)]
     DeltaTable(#[from] deltalake::DeltaTableError),
+    /// Error occurring when joining Tokio tasks.
     #[error(transparent)]
     TaskJoin(#[from] tokio::task::JoinError),
+    /// Error originating from the Delta Lake client setup or connection (`super::client`).
     #[error(transparent)]
     Client(#[from] super::client::Error),
+    /// Error originating from the DataFusion query engine, used for MERGE operations.
+    #[error(transparent)]
+    DataFusion(#[from] deltalake::datafusion::error::DataFusionError),
+    /// An expected attribute or configuration value was missing.
     #[error("missing required event attrubute")]
+    // Note: "attrubute" typo exists in original code
     MissingRequiredAttribute(String),
+    /// The required `path` configuration for the Delta table was not provided.
     #[error("missing required config value path")]
     MissingPath(),
+    /// Internal error: The DeltaTable reference was unexpectedly missing.
     #[error("missing required value DeltaTable")]
     MissingDeltaTable(),
+    /// Could not extract a filename from the configured Delta table path.
     #[error("no filename in provided path")]
     EmptyFileName(),
+    /// An expected string value was empty (e.g., filename conversion).
     #[error("no value in provided str")]
     EmptyStr(),
 }
 
-pub struct EventHandler {
+/// Handles the processing logic for a single incoming `Event`.
+///
+/// An `EventHandler` instance is created for each event that needs to be written.
+/// It holds references to the shared `Client` and `Writer` configuration
+/// necessary to perform the write operation.
+struct EventHandler {
+    /// Thread-safe reference to the Delta Lake client.
     client: Arc<Mutex<super::client::Client>>,
+    /// Thread-safe reference to the writer configuration.
     config: Arc<super::config::Writer>,
 }
 
 impl EventHandler {
+    /// Processes a single event by writing its data to the configured Delta Lake table.
+    ///
+    /// This method acquires a lock on the shared client, determines the operation
+    /// (Append or Merge) based on the configuration, executes the corresponding
+    /// Delta Lake operation, and logs the result. It consumes the `EventHandler` instance.
+    ///
+    /// # Arguments
+    /// * `event` - The `Event` containing the data (`RecordBatch`) to be written.
+    ///
+    /// # Returns
+    /// * `Ok(())` if the event was processed and written successfully.
+    /// * `Err(Error)` if any error occurred during processing or writing.
     async fn process(self, event: Event) -> Result<(), Error> {
+        // Lock the client and setup necessary components i.e. table, operations context,
+        // writer properties etc.
         let mut client = self.client.lock().await;
-
         let table = client.table.as_mut().ok_or_else(Error::MissingDeltaTable)?;
         let ops = DeltaOps::from(table.clone());
+        let writer_properties = WriterProperties::builder()
+            .set_compression(Compression::ZSTD(
+                ZstdLevel::try_new(3).map_err(Error::Parquet)?,
+            ))
+            .build();
 
-        let ctx = SessionContext::new();
-        let schema = event.data.schema();
-        let provider = MemTable::try_new(schema.clone(), vec![vec![event.data]]).unwrap();
-        ctx.register_table("source", Arc::new(provider)).unwrap();
+        // Match on operation and Append or Merge source data (event) into the target table.
+        match self.config.operation {
+            crate::config::Operation::Append => {
+                let mut writer = RecordBatchWriter::for_table(table)
+                    .map_err(Error::DeltaTable)?
+                    .with_writer_properties(writer_properties);
 
-        // Now, get a DataFusion DataFrame handle for the source:
-        let df = ctx.table("source").await.unwrap();
-        let predicate = "target.Id = source.Id";
-        ops.merge(df, predicate)
-            .with_source_alias("source")
-            .with_target_alias("target")
-            // .when_not_matched_insert(|insert| insert.set("Id", col("source.\"Id\"")))?
-            .await
-            .unwrap();
+                writer.write(event.data).await.map_err(Error::DeltaTable)?;
+                writer
+                    .flush_and_commit(table)
+                    .await
+                    .map_err(Error::DeltaTable)?;
+            }
+            crate::config::Operation::Merge => {
+                let ctx = SessionContext::new();
+                let schema = event.data.schema();
+                let provider = MemTable::try_new(schema.clone(), vec![vec![event.data]])
+                    .map_err(Error::DataFusion)?;
+                ctx.register_table(DEFAULT_SOURCE_ALIAS, Arc::new(provider))
+                    .map_err(Error::DataFusion)?;
+                let df = ctx
+                    .table(DEFAULT_SOURCE_ALIAS)
+                    .await
+                    .map_err(Error::DataFusion)?;
 
-        // let writer_properties = WriterProperties::builder()
-        //     .set_compression(Compression::ZSTD(
-        //         ZstdLevel::try_new(3).map_err(Error::Parquet)?,
-        //     ))
-        //     .build();
+                let predicate = self
+                    .config
+                    .predicate
+                    .clone()
+                    .ok_or_else(|| Error::MissingRequiredAttribute("predicate".to_string()))?;
 
-        // let mut writer = RecordBatchWriter::for_table(table)
-        //     .map_err(Error::DeltaTable)?
-        //     .with_writer_properties(writer_properties);
+                ops.merge(df, predicate)
+                    .with_source_alias(DEFAULT_SOURCE_ALIAS)
+                    .with_target_alias(DEFAULT_TARGET_ALIAS)
+                    .with_writer_properties(writer_properties)
+                    .with_streaming(true)
+                    .await
+                    .map_err(Error::DeltaTable)?;
+            }
+        }
 
-        // writer.write(event.data).await.map_err(Error::DeltaTable)?;
-        // writer
-        //     .flush_and_commit(table)
-        //     .await
-        //     .map_err(Error::DeltaTable)?;
-
+        // Setup logging elements and log info in case of sucessfull table operation.
         let file_stem = self
             .config
             .path
@@ -100,22 +177,45 @@ impl EventHandler {
     }
 }
 
+/// The main asynchronous runner for writing events to a Delta Lake table.
+///
+/// Implements the `flowgen_core::task::runner::Runner` trait. It manages
+/// the connection to the Delta table and listens for incoming `Event`s on a
+/// broadcast channel receiver (`rx`). For each valid event, it spawns an
+/// `EventHandler` task to perform the actual write operation.
 #[derive(Debug)]
 pub struct Writer {
+    /// Shared configuration for the writer task.
     config: Arc<super::config::Writer>,
+    /// Receiver end of the broadcast channel for incoming events.
     rx: Receiver<Event>,
+    /// The ID assigned to this writer task, used for filtering events.
     current_task_id: usize,
 }
 
 impl flowgen_core::task::runner::Runner for Writer {
     type Error = Error;
+
+    /// Executes the main loop of the writer task.
+    ///
+    /// 1. Initializes the Delta Lake client (`super::client::Client`).
+    /// 2. Enters a loop, receiving `Event`s from the `rx` channel.
+    /// 3. Filters events based on `event.current_task_id` to ensure it processes
+    ///    events intended for the previous task in the pipeline (`current_task_id - 1`).
+    /// 4. For valid events, clones shared resources (`client`, `config`) and
+    ///    spawns an `EventHandler` task via `tokio::spawn` to process the event.
+    /// 5. Logs errors encountered during client connection or event processing.
+    ///
+    /// # Returns
+    /// * `Ok(())` if the loop terminates gracefully (e.g., channel closes).
+    /// * `Err(Error)` if client initialization fails.
     async fn run(mut self) -> Result<(), Error> {
         // Build a DeltaTable client with credentials and storage path.
         // Return thread-safe reference to use in the downstream components.
         let client = match super::client::ClientBuilder::new()
             .credentials(self.config.credentials.clone())
             .path(self.config.path.clone())
-            .columns(self.config.columns.clone())
+            .create_options(self.config.create_options.clone())
             .build()
         {
             Ok(client) => match client.connect().await {
@@ -133,12 +233,17 @@ impl flowgen_core::task::runner::Runner for Writer {
 
         // Receive events, validate if the event should be processed.
         while let Ok(event) = self.rx.recv().await {
+            // Process events where `current_task_id` matches the *previous* task's ID.
+            // This assumes tasks are chained, and this writer processes output from task `N-1`.
             if event.current_task_id == Some(self.current_task_id - 1) {
                 // Setup thread-safe reference to variables and pass to EventHandler.
                 let client = Arc::clone(&client);
                 let config = Arc::clone(&self.config);
                 let event_handler = EventHandler { client, config };
 
+                // Spawn a new asynchronous task to handle the event processing.
+                // This allows the main loop to continue receiving new events
+                // while existing events are being written concurrently.
                 tokio::spawn(async move {
                     // Process the events and in case of error log it.
                     if let Err(err) = event_handler.process(event).await {
@@ -151,6 +256,10 @@ impl flowgen_core::task::runner::Runner for Writer {
     }
 }
 
+/// Builder for creating [`Writer`] instances.
+///
+/// Provides an API for setting the required configuration and
+/// channel receiver before constructing the `Writer`.
 #[derive(Default)]
 pub struct WriterBuilder {
     config: Option<Arc<super::config::Writer>>,
@@ -159,28 +268,53 @@ pub struct WriterBuilder {
 }
 
 impl WriterBuilder {
+    /// Creates a new `WriterBuilder` with default values.
     pub fn new() -> WriterBuilder {
         WriterBuilder {
             ..Default::default()
         }
     }
 
+    /// Sets the writer configuration.
+    ///
+    /// # Arguments
+    /// * `config` - An `Arc` containing the `super::config::Writer` configuration.
     pub fn config(mut self, config: Arc<super::config::Writer>) -> Self {
         self.config = Some(config);
         self
     }
 
+    /// Sets the broadcast channel receiver for incoming events.
+    ///
+    /// # Arguments
+    /// * `receiver` - The `Receiver<Event>` end of the broadcast channel.
     pub fn receiver(mut self, receiver: Receiver<Event>) -> Self {
         self.rx = Some(receiver);
         self
     }
 
+    /// Sets the ID for this writer task.
+    ///
+    /// This ID is used to filter incoming events in the `Writer::run` method,
+    /// typically processing events whose `current_task_id` matches `this_task_id - 1`.
+    ///
+    /// # Arguments
+    /// * `current_task_id` - The unique identifier assigned to this task instance.
     pub fn current_task_id(mut self, current_task_id: usize) -> Self {
         self.current_task_id = current_task_id;
         self
     }
 
+    /// Builds the `Writer` instance.
+    ///
+    /// Consumes the builder and returns a `Writer` if all required fields (`config`, `rx`)
+    /// have been set.
+    ///
+    /// # Returns
+    /// * `Ok(Writer)` if construction is successful.
+    /// * `Err(Error::MissingRequiredAttribute)` if `config` or `rx` was not provided.
     pub async fn build(self) -> Result<Writer, Error> {
+        // Note: This build method is async but doesn't perform any async operations itself.
         Ok(Writer {
             config: self
                 .config
