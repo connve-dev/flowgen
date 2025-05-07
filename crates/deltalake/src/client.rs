@@ -126,8 +126,41 @@ impl flowgen_core::connect::client::Client for Client {
                             // Convert config schema to Delta Lake schema.
                             for c in config_columns {
                                 let data_type = match c.data_type {
-                                    crate::config::DataType::Utf8 => {
+                                    crate::config::DataType::String => {
                                         DataType::Primitive(PrimitiveType::String)
+                                    }
+                                    crate::config::DataType::Boolean => {
+                                        DataType::Primitive(PrimitiveType::Boolean)
+                                    }
+                                    crate::config::DataType::Float => {
+                                        DataType::Primitive(PrimitiveType::Float)
+                                    }
+                                    crate::config::DataType::Double => {
+                                        DataType::Primitive(PrimitiveType::Double)
+                                    }
+                                    crate::config::DataType::Timestamp => {
+                                        DataType::Primitive(PrimitiveType::Timestamp)
+                                    }
+                                    crate::config::DataType::TimestampNtz => {
+                                        DataType::Primitive(PrimitiveType::TimestampNtz)
+                                    }
+                                    crate::config::DataType::Date => {
+                                        DataType::Primitive(PrimitiveType::Date)
+                                    }
+                                    crate::config::DataType::Integer => {
+                                        DataType::Primitive(PrimitiveType::Integer)
+                                    }
+                                    crate::config::DataType::Long => {
+                                        DataType::Primitive(PrimitiveType::Long)
+                                    }
+                                    crate::config::DataType::Short => {
+                                        DataType::Primitive(PrimitiveType::Short)
+                                    }
+                                    crate::config::DataType::Byte => {
+                                        DataType::Primitive(PrimitiveType::Byte)
+                                    }
+                                    crate::config::DataType::Binary => {
+                                        DataType::Primitive(PrimitiveType::Binary)
                                     }
                                 };
                                 let struct_field =

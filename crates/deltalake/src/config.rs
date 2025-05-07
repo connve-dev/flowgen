@@ -93,11 +93,31 @@ pub struct Column {
 /// Currently, only a limited set of types might be defined.
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
 pub enum DataType {
-    /// Represents a UTF-8 encoded string type. (Default)
     #[default]
-    Utf8,
-    // Add other potential data types here in the future, e.g.:
-    // Int64, Float64, Boolean, Timestamp, etc.
+    /// UTF-8 encoded string of characters.
+    String,
+    /// i64: 8-byte signed integer. Range: -9223372036854775808 to 9223372036854775807.
+    Long,
+    /// i32: 4-byte signed integer. Range: -2147483648 to 2147483647.
+    Integer,
+    /// i16: 2-byte signed integer numbers. Range: -32768 to 32767.
+    Short,
+    /// i8: 1-byte signed integer number. Range: -128 to 127.
+    Byte,
+    /// f32: 4-byte single-precision floating-point numbers.
+    Float,
+    /// f64: 8-byte double-precision floating-point numbers.
+    Double,
+    /// bool: boolean values.
+    Boolean,
+    /// Sequence of bytes.
+    Binary,
+    /// Date32: 4-byte date .
+    Date,
+    /// Microsecond precision timestamp, adjusted to UTC.
+    Timestamp,
+    /// Microsecond precision timestamp, no time zone.
+    TimestampNtz,
 }
 
 /// Defines the write strategy or operation mode for the writer.

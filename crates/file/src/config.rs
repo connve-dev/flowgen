@@ -16,9 +16,11 @@ use std::path::PathBuf;
 
 #[derive(PartialEq, Default, Clone, Debug, Deserialize, Serialize)]
 pub struct Reader {
+    pub label: Option<String>,
     pub path: String,
     pub batch_size: Option<usize>,
     pub has_header: Option<bool>,
+    pub cache_schema: Option<bool>,
 }
 
 /// A configuration option for the File Writer.

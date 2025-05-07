@@ -70,6 +70,10 @@ impl flowgen_core::task::runner::Runner for Reader {
                         .map_err(Error::Arrow)?;
                     file.rewind().map_err(Error::IO)?;
 
+                    // if config.cache_schema.is_some_and(|x| x) {
+                    //     println!("cache")
+                    // }
+
                     let batch_size = match config.batch_size {
                         Some(batch_size) => batch_size,
                         None => DEFAULT_BATCH_SIZE,
