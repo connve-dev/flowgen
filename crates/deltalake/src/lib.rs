@@ -8,3 +8,6 @@ pub mod config;
 /// Provides functionality for writing data, likely using configurations
 /// defined in the `config` module.
 pub mod writer;
+
+// Provides type extensions for flowgen_core::stream::Event.
+pub mod event;

@@ -24,12 +24,10 @@
 //!    operation (Append or Merge using DataFusion), executes it, and logs the outcome.
 //! 7. Errors during client connection or event processing are logged using the `tracing` crate.
 
+use crate::event::EventExt;
 use chrono::Utc;
 use deltalake::{
-    arrow::{
-        array::{Array, RecordBatch, TimestampMicrosecondArray, TimestampMillisecondArray},
-        datatypes::{DataType, Field, Schema, TimeUnit},
-    },
+    arrow::datatypes::{DataType, Field, Schema, TimeUnit},
     datafusion::{datasource::MemTable, prelude::SessionContext},
     kernel::{StructField, StructType},
     parquet::{
@@ -56,6 +54,12 @@ const DEFAULT_SOURCE_ALIAS: &str = "source";
 /// Errors that can occur during the Delta Lake writing process.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Error originating from the event extension crate.
+    #[error(transparent)]
+    Event(#[from] super::event::Error),
+    /// Error originating from the Apache Arrow crate.
+    #[error(transparent)]
+    Arrow(#[from] arrow::error::ArrowError),
     /// Error originating from the Parquet library used by Delta Lake.
     #[error(transparent)]
     Parquet(#[from] deltalake::parquet::errors::ParquetError),
@@ -86,55 +90,6 @@ pub enum Error {
     /// An expected string value was empty (e.g., filename conversion).
     #[error("no value in provided str")]
     EmptyStr(),
-}
-
-fn adjust_event_data_precision(event: &mut Event) -> Result<(), Error> {
-    let columns = event.data.columns();
-    let schema = event.data.schema();
-
-    let mut new_fields: Vec<Arc<Field>> = Vec::new();
-    let mut new_columns = Vec::new();
-
-    for (i, field) in schema.fields().iter().enumerate() {
-        match field.data_type() {
-            DataType::Timestamp(TimeUnit::Millisecond, tz) => {
-                // Update field to microsecond precision
-                let new_field = Arc::new(Field::new(
-                    field.name(),
-                    DataType::Timestamp(TimeUnit::Microsecond, tz.clone()),
-                    field.is_nullable(),
-                ));
-                new_fields.push(new_field);
-
-                // Convert column data
-                let old_array = &columns[i];
-                let millis_array = old_array
-                    .as_any()
-                    .downcast_ref::<TimestampMillisecondArray>()
-                    .unwrap();
-
-                let micros_data: Vec<Option<i64>> = millis_array
-                    .iter()
-                    .map(|val| val.map(|ms| ms * 1000))
-                    .collect();
-
-                let new_array = TimestampMicrosecondArray::from(micros_data);
-                new_columns.push(Arc::new(new_array) as Arc<dyn Array>);
-            }
-            _ => {
-                new_fields.push(field.clone());
-                new_columns.push(columns[i].clone());
-            }
-        }
-    }
-
-    let new_schema = Arc::new(Schema::new(new_fields));
-    let new_batch = RecordBatch::try_new(new_schema, new_columns).unwrap();
-
-    // Update your event data
-    event.data = new_batch;
-
-    Ok(())
 }
 
 /// Handles the processing logic for a single incoming `Event`.
@@ -174,6 +129,10 @@ impl EventHandler {
             ))
             .build();
 
+        // Deltatable supports Timestamp with Microseconds only.
+        // We call this helper function to do event data adjustment.
+        event.adjust_data_precision().map_err(Error::Event)?;
+
         // Match on operation and Append or Merge source data (event) into the target table.
         match self.config.operation {
             crate::config::Operation::Append => {
@@ -181,7 +140,6 @@ impl EventHandler {
                     .map_err(Error::DeltaTable)?
                     .with_writer_properties(writer_properties);
 
-                adjust_event_data_precision(&mut event).unwrap();
                 writer.write(event.data).await.map_err(Error::DeltaTable)?;
                 writer
                     .flush_and_commit(table)
@@ -299,7 +257,6 @@ impl<T: Cache> flowgen_core::task::runner::Runner for Writer<T> {
 
                 let struct_fields: Vec<StructField> = delta_schema.fields().cloned().collect();
                 columns = struct_fields;
-                println!("{:?}", columns);
             }
         };
 

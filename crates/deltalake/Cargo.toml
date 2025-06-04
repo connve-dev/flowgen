@@ -18,6 +18,7 @@ reqwest = { workspace = true }
 flowgen_core = { path = "../core" }
 handlebars = { workspace = true }
 arrow-json = { workspace = true }
+arrow = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
