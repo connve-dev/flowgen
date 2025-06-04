@@ -28,7 +28,11 @@ use crate::{event::EventExt, schema::SchemaExt};
 use chrono::Utc;
 use deltalake::{
     arrow::datatypes::Schema,
-    datafusion::{datasource::MemTable, prelude::SessionContext},
+    datafusion::{
+        common::Column,
+        datasource::MemTable,
+        prelude::{Expr, SessionContext},
+    },
     kernel::{StructField, StructType},
     parquet::{
         basic::{Compression, ZstdLevel},
@@ -176,10 +180,23 @@ impl EventHandler {
                     .clone()
                     .ok_or_else(|| Error::MissingRequiredAttribute("predicate".to_string()))?;
 
+                let column_names: Vec<String> = schema
+                    .fields()
+                    .iter()
+                    .map(|field| field.name().clone())
+                    .collect();
+
                 ops.merge(df, predicate)
                     .with_source_alias(DEFAULT_SOURCE_ALIAS)
                     .with_target_alias(DEFAULT_TARGET_ALIAS)
                     .with_writer_properties(writer_properties)
+                    .when_not_matched_insert(|insert| {
+                        column_names.iter().fold(insert, |acc, col_name| {
+                            let qualified_col =
+                                Expr::Column(Column::new(Some(DEFAULT_SOURCE_ALIAS), col_name));
+                            acc.set(col_name, qualified_col)
+                        })
+                    })?
                     .with_streaming(true)
                     .await
                     .map_err(Error::DeltaTable)?;
