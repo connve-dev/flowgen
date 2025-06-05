@@ -1,16 +1,20 @@
 use glob::glob;
 use std::env;
+use std::path::PathBuf;
 use std::process;
 use tracing::error;
 use tracing::event;
 use tracing::Level;
-pub const DEFAULT_TOPIC_NAME: &str = "/data/ChangeEvents";
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
     let config_dir = env::var("CONFIG_DIR").expect("env variable CONFIG_DIR should be set");
+    let cache_credentials_path = env::var("CACHE_CREDENTIALS_PATH")
+        .expect("env variable CACHE_CREDENTIALS_PATH should be set");
+
+    let cache_credentials_path = PathBuf::from(cache_credentials_path);
 
     if let Ok(configs) = glob(&config_dir) {
         let num_configs = configs.count();
@@ -24,7 +28,6 @@ async fn main() {
         }
     }
 
-    let mut all_handle_list = Vec::new();
     for config in glob(&config_dir).unwrap_or_else(|err| {
         error!("{:?}", err);
         process::exit(1);
@@ -34,7 +37,9 @@ async fn main() {
             process::exit(1);
         });
 
-        let f = flowgen::flow::Builder::new(config_path)
+        let f = flowgen::flow::FlowBuilder::new()
+            .config_path(&config_path)
+            .cache_credentials_path(&cache_credentials_path)
             .build()
             .unwrap_or_else(|err| {
                 error!("{:?}", err);
@@ -47,24 +52,8 @@ async fn main() {
                 process::exit(1);
             });
 
-        if let Some(handle_list) = f.handle_list {
-            for handle in handle_list {
-                all_handle_list.push(handle);
-            }
-        }
-    }
-
-    for handle in all_handle_list {
-        let result = handle.await;
-        match result {
-            Ok(result) => {
-                if let Err(e) = result {
-                    error!("{:?}", e);
-                };
-            }
-            Err(e) => {
-                error!("{:?}", e);
-            }
+        if let Some(tasks) = f.task_list {
+            futures_util::future::join_all(tasks).await;
         }
     }
 }

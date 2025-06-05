@@ -1,11 +1,11 @@
 use arrow::csv::reader::Format;
 use async_nats::jetstream::{context::ObjectStoreErrorKind, object_store::GetErrorKind};
+use chrono::Utc;
 use flowgen_core::{connect::client::Client, stream::event::Event, stream::event::EventBuilder};
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::sync::broadcast::Sender;
 use tokio_stream::StreamExt;
-use chrono::Utc;
 use tracing::{event, Level};
 
 const DEFAULT_MESSAGE_SUBJECT: &str = "nats.object.store.in";
@@ -51,7 +51,10 @@ impl Reader {
             .map_err(Error::NatsClient)?;
 
         if let Some(jetstream) = client.jetstream {
-            let bucket = jetstream.get_object_store(&self.config.bucket).await.map_err(Error::NatsObjectStoreBucketError)?;
+            let bucket = jetstream
+                .get_object_store(&self.config.bucket)
+                .await
+                .map_err(Error::NatsObjectStoreBucketError)?;
             let mut objects_stream = bucket
                 .list()
                 .await
@@ -80,13 +83,13 @@ impl Reader {
                     .map_err(Error::Arrow)?;
 
                 let batch_size = match self.config.batch_size {
-                        Some(batch_size) => batch_size,
-                        None => DEFAULT_BATCH_SIZE,
+                    Some(batch_size) => batch_size,
+                    None => DEFAULT_BATCH_SIZE,
                 };
-        
+
                 let has_header = match self.config.has_header {
-                        Some(has_header) => has_header,
-                        None => DEFAULT_HAS_HEADER,
+                    Some(has_header) => has_header,
+                    None => DEFAULT_HAS_HEADER,
                 };
 
                 let csv = arrow::csv::ReaderBuilder::new(Arc::new(schema.clone()))
@@ -98,7 +101,8 @@ impl Reader {
                 for batch in csv {
                     let recordbatch = batch.map_err(Error::Arrow)?;
                     let timestamp = Utc::now().timestamp_micros();
-                    let subject = format!("{}.{}.{}", DEFAULT_MESSAGE_SUBJECT, file_name, timestamp);
+                    let subject =
+                        format!("{}.{}.{}", DEFAULT_MESSAGE_SUBJECT, file_name, timestamp);
                     let e = EventBuilder::new()
                         .data(recordbatch)
                         .subject(subject)
@@ -107,7 +111,7 @@ impl Reader {
                         .map_err(Error::Event)?;
 
                     self.tx.send(e.clone()).map_err(Error::SendMessage)?;
-                    event!(Level::INFO, "event received: {}", e.subject);
+                    event!(Level::INFO, "event processed: {}", e.subject);
                 }
             }
         }

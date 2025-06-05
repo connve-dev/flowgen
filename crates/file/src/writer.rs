@@ -5,7 +5,7 @@ use std::{fs::File, sync::Arc};
 use tokio::{sync::broadcast::Receiver, task::JoinHandle};
 use tracing::{event, Level};
 
-const DEFAULT_MESSAGE_SUBJECT: &str = "file.out";
+const DEFAULT_MESSAGE_SUBJECT: &str = "file.writer";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -65,7 +65,7 @@ impl flowgen_core::task::runner::Runner for Writer {
                         "{}.{}.{}.{}",
                         DEFAULT_MESSAGE_SUBJECT, file_stem, timestamp, file_ext
                     );
-                    event!(Level::INFO, "event published: {}", subject);
+                    event!(Level::INFO, "event processed: {}", subject);
 
                     Ok(())
                 });

@@ -11,27 +11,19 @@ name = "flowgen_deltalake"
 path = "src/lib.rs"
 
 [dependencies]
-oauth2 = "4.4.2"
-prost = "0.12.3"
-prost-types = "0.12.3"
-serde = { version = "1.0.195", features = ["derive"] }
-serde_json = { version = "1.0.111" }
-tonic = "0.10.2"
-bytes = "1.5.0"
-tokio = "1.35.1"
-futures-util = "0.3.30"
-tokio-stream = "0.1.14"
-tokio-util = "0.7.10"
-thiserror = "1.0.63"
-url = "2.5.2"
+serde_json = { workspace = true }
+futures = { workspace = true }
+futures-util = { workspace = true }
+reqwest = { workspace = true }
 flowgen_core = { path = "../core" }
-async-nats = "0.35.1"
-arrow = "53.3.0"
-futures = "0.3.30"
-bincode = "1.3.3"
-chrono = "0.4.38"
-deltalake = { version = "0.22.3", features = ["datafusion"] }
-deltalake-gcp = "0.6.0"
-
-[build-dependencies]
-tonic-build = "0.10.2"
+flowgen_nats = { path = "../nats" }
+handlebars = { workspace = true }
+arrow-json = { workspace = true }
+arrow = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+deltalake = { workspace = true }
+deltalake-gcp = { workspace = true }

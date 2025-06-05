@@ -1,61 +1,107 @@
 use super::config;
 use crate::config::Task;
-use flowgen_core::{stream::event::Event, task::runner::Runner};
-use std::{path::PathBuf, sync::Arc};
+use flowgen_core::{cache::Cache, stream::event::Event, task::runner::Runner};
+use std::{path::Path, sync::Arc};
 use tokio::{
     sync::broadcast::{Receiver, Sender},
     task::JoinHandle,
 };
+use tracing::error;
+
+/// Default alias for the source data (in-memory table) in MERGE operations.
+const DEFAULT_CACHE_NAME: &str = "flowgen_cache";
 
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("error reading a credentials file at path {1}")]
-    OpenFile(#[source] std::io::Error, PathBuf),
-    #[error("error parsing config file")]
-    ParseConfig(#[source] serde_json::Error),
-    #[error("error setting up Salesforce PubSub as flow source")]
-    SalesforcePubSubSubscriber(#[source] flowgen_salesforce::pubsub::subscriber::Error),
-    #[error("error setting up Salesforce PubSub as flow source")]
-    SalesforcePubsubPublisher(#[source] flowgen_salesforce::pubsub::publisher::Error),
-    #[error("error processing http request")]
-    HttpProcessor(#[source] flowgen_http::processor::Error),
-    #[error("error processing element during enumaration")]
-    EnumerateProcessor(#[source] flowgen_core::task::enumerate::processor::Error),
-    #[error("error with NATS JetStream Publisher")]
-    NatsJetStreamPublisher(#[source] flowgen_nats::jetstream::publisher::Error),
-    #[error("error with NATS JetStream Subscriber")]
-    NatsJetStreamSubscriber(#[source] flowgen_nats::jetstream::subscriber::Error),
-    #[error("error with file subscriber")]
-    FileReader(#[source] flowgen_file::reader::Error),
-    #[error("error with file publisher")]
-    FileWriter(#[source] flowgen_file::writer::Error),
-    #[error("error with generate subscriber")]
-    GenerateSubscriber(#[source] flowgen_core::task::generate::subscriber::Error),
-    #[error("error with NATS JetStream Subscriber")]
-    NatsJetStreamObjectStoreSubscriber(#[source] flowgen_nats::jetstream::object_store::reader::Error),
-
+    #[error(transparent)]
+    DeltalakeWriter(#[from] flowgen_deltalake::writer::Error),
+    #[error(transparent)]
+    EnumerateProcessor(#[from] flowgen_core::task::enumerate::processor::Error),
+    #[error(transparent)]
+    OpenFile(#[from] std::io::Error),
+    #[error(transparent)]
+    Serde(#[from] serde_json::Error),
+    #[error(transparent)]
+    SalesforcePubSubSubscriber(#[from] flowgen_salesforce::pubsub::subscriber::Error),
+    #[error(transparent)]
+    SalesforcePubsubPublisher(#[from] flowgen_salesforce::pubsub::publisher::Error),
+    #[error(transparent)]
+    HttpProcessor(#[from] flowgen_http::processor::Error),
+    #[error(transparent)]
+    NatsJetStreamPublisher(#[from] flowgen_nats::jetstream::publisher::Error),
+    #[error(transparent)]
+    NatsJetStreamSubscriber(#[from] flowgen_nats::jetstream::subscriber::Error),
+    #[error(transparent)]
+    Cache(#[from] flowgen_nats::cache::Error),
+    #[error(transparent)]
+    FileReader(#[from] flowgen_file::reader::Error),
+    #[error(transparent)]
+    FileWriter(#[from] flowgen_file::writer::Error),
+    #[error(transparent)]
+    GenerateSubscriber(#[from] flowgen_core::task::generate::subscriber::Error),
+    #[error(transparent)]
+    NatsJetStreamObjectStoreSubscriber(
+        #[from] flowgen_nats::jetstream::object_store::reader::Error,
+    ),
+    #[error(transparent)]
+    RenderProcessor(#[from] flowgen_core::task::render::processor::Error),
+    #[error("missing required event attribute")]
+    MissingRequiredAttribute(String),
 }
 
 #[derive(Debug)]
-pub struct Flow {
-    config: config::Config,
-    pub handle_list: Option<Vec<JoinHandle<Result<(), Error>>>>,
+pub struct Flow<'a> {
+    config_path: &'a Path,
+    cache_credential_path: &'a Path,
+    pub task_list: Option<Vec<JoinHandle<Result<(), Error>>>>,
 }
 
-impl Flow {
+impl Flow<'_> {
     pub async fn run(mut self) -> Result<Self, Error> {
-        let config = &self.config;
-        let mut handle_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
+        let c = std::fs::read_to_string(self.config_path).map_err(Error::OpenFile)?;
+        let config: config::Config = serde_json::from_str(&c).map_err(Error::Serde)?;
+
+        let mut task_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
         let (tx, _): (Sender<Event>, Receiver<Event>) = tokio::sync::broadcast::channel(1000);
+
+        let cache = flowgen_nats::cache::CacheBuilder::new()
+            .credentials_path(self.cache_credential_path.to_path_buf())
+            .build()
+            .map_err(Error::Cache)?
+            .init(DEFAULT_CACHE_NAME)
+            .await
+            .map_err(Error::Cache)?;
+
+        let cache = Arc::new(cache);
 
         for (i, task) in config.flow.tasks.iter().enumerate() {
             match task {
+                Task::deltalake_writer(config) => {
+                    let config = Arc::new(config.to_owned());
+                    let rx = tx.subscribe();
+                    let cache = Arc::clone(&cache);
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                        flowgen_deltalake::writer::WriterBuilder::new()
+                            .config(config)
+                            .receiver(rx)
+                            .current_task_id(i)
+                            .cache(cache)
+                            .build()
+                            .map_err(Error::DeltalakeWriter)?
+                            .run()
+                            .await
+                            .map_err(Error::DeltalakeWriter)?;
+                        Ok(())
+                    });
+                    task_list.push(task);
+                }
+
                 Task::enumerate(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
                     let tx = tx.clone();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                         flowgen_core::task::enumerate::processor::ProcessorBuilder::new()
                             .config(config)
                             .receiver(rx)
@@ -70,17 +116,19 @@ impl Flow {
 
                         Ok(())
                     });
-                    handle_list.push(handle);
+                    task_list.push(task);
                 }
                 Task::file_reader(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
                     let tx = tx.clone();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let cache = Arc::clone(&cache);
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                         flowgen_file::reader::ReaderBuilder::new()
                             .config(config)
                             .sender(tx)
                             .receiver(rx)
+                            .cache(cache)
                             .current_task_id(i)
                             .build()
                             .await
@@ -90,12 +138,12 @@ impl Flow {
                             .map_err(Error::FileReader)?;
                         Ok(())
                     });
-                    handle_list.push(handle);
+                    task_list.push(task);
                 }
                 Task::file_writer(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                         flowgen_file::writer::WriterBuilder::new()
                             .config(config)
                             .receiver(rx)
@@ -108,12 +156,12 @@ impl Flow {
                             .map_err(Error::FileWriter)?;
                         Ok(())
                     });
-                    handle_list.push(handle);
+                    task_list.push(task);
                 }
                 Task::generate(config) => {
                     let config = Arc::new(config.to_owned());
                     let tx = tx.clone();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                         flowgen_core::task::generate::subscriber::SubscriberBuilder::new()
                             .config(config)
                             .sender(tx)
@@ -126,13 +174,13 @@ impl Flow {
                             .map_err(Error::GenerateSubscriber)?;
                         Ok(())
                     });
-                    handle_list.push(handle);
+                    task_list.push(task);
                 }
                 Task::http(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
                     let tx = tx.clone();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                         flowgen_http::processor::ProcessorBuilder::new()
                             .config(config)
                             .receiver(rx)
@@ -147,12 +195,12 @@ impl Flow {
 
                         Ok(())
                     });
-                    handle_list.push(handle);
+                    task_list.push(task);
                 }
                 Task::nats_jetstream_subscriber(config) => {
                     let config = Arc::new(config.to_owned());
                     let tx = tx.clone();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                         flowgen_nats::jetstream::subscriber::SubscriberBuilder::new()
                             .config(config)
                             .sender(tx)
@@ -165,12 +213,12 @@ impl Flow {
                             .map_err(Error::NatsJetStreamSubscriber)?;
                         Ok(())
                     });
-                    handle_list.push(handle);
+                    task_list.push(task);
                 }
                 Task::nats_jetstream_publisher(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                         flowgen_nats::jetstream::publisher::PublisherBuilder::new()
                             .config(config)
                             .receiver(rx)
@@ -183,31 +231,30 @@ impl Flow {
                             .map_err(Error::NatsJetStreamPublisher)?;
                         Ok(())
                     });
-                    handle_list.push(handle);
+                    task_list.push(task);
                 }
                 Task::object_store_subscriber(config) => {
                     let config = Arc::new(config.to_owned());
-                        let tx = tx.clone();
-                        let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                            flowgen_nats::jetstream::object_store::reader::ReaderBuilder::new()
-                                .config(config)
-                                .sender(tx)
-                                .current_task_id(i)
-                                .build()
-                                .await
-                                .map_err(Error::NatsJetStreamObjectStoreSubscriber)?
-                                .subscribe()
-                                .await
-                                .map_err(Error::NatsJetStreamObjectStoreSubscriber)?;
-                            Ok(())
-                        });
-                        handle_list.push(handle);
-
+                    let tx = tx.clone();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                        flowgen_nats::jetstream::object_store::reader::ReaderBuilder::new()
+                            .config(config)
+                            .sender(tx)
+                            .current_task_id(i)
+                            .build()
+                            .await
+                            .map_err(Error::NatsJetStreamObjectStoreSubscriber)?
+                            .subscribe()
+                            .await
+                            .map_err(Error::NatsJetStreamObjectStoreSubscriber)?;
+                        Ok(())
+                    });
+                    task_list.push(task);
                 }
                 Task::salesforce_pubsub_subscriber(config) => {
                     let config = Arc::new(config.to_owned());
                     let tx = tx.clone();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                         flowgen_salesforce::pubsub::subscriber::SubscriberBuilder::new()
                             .config(config)
                             .sender(tx)
@@ -220,12 +267,12 @@ impl Flow {
                             .map_err(Error::SalesforcePubSubSubscriber)?;
                         Ok(())
                     });
-                    handle_list.push(handle);
+                    task_list.push(task);
                 }
                 Task::salesforce_pubsub_publisher(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
-                    let handle: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                         flowgen_salesforce::pubsub::publisher::PublisherBuilder::new()
                             .config(config)
                             .receiver(rx)
@@ -238,32 +285,66 @@ impl Flow {
                             .map_err(Error::SalesforcePubsubPublisher)?;
                         Ok(())
                     });
-                    handle_list.push(handle);
+                    task_list.push(task);
+                }
+                Task::render(config) => {
+                    let config = Arc::new(config.to_owned());
+                    let rx = tx.subscribe();
+                    let tx = tx.clone();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                        flowgen_core::task::render::processor::ProcessorBuilder::new()
+                            .config(config)
+                            .receiver(rx)
+                            .sender(tx)
+                            .current_task_id(i)
+                            .build()
+                            .await
+                            .map_err(Error::RenderProcessor)?
+                            .run()
+                            .await
+                            .map_err(Error::RenderProcessor)?;
+
+                        Ok(())
+                    });
+                    task_list.push(task);
                 }
             }
         }
-        self.handle_list = Some(handle_list);
+        self.task_list = Some(task_list);
         Ok(self)
     }
 }
 
-#[derive(Default, Debug)]
-pub struct Builder {
-    config_path: PathBuf,
+#[derive(Default)]
+pub struct FlowBuilder<'a> {
+    config_path: Option<&'a Path>,
+    cache_credentials_path: Option<&'a Path>,
 }
 
-impl Builder {
-    pub fn new(config_path: PathBuf) -> Builder {
-        Builder { config_path }
+impl<'a> FlowBuilder<'a> {
+    pub fn new() -> Self {
+        Self::default()
     }
-    pub fn build(&mut self) -> Result<Flow, Error> {
-        let c = std::fs::read_to_string(&self.config_path)
-            .map_err(|e| Error::OpenFile(e, self.config_path.clone()))?;
-        let config: config::Config = serde_json::from_str(&c).map_err(Error::ParseConfig)?;
-        let f = Flow {
-            config,
-            handle_list: None,
-        };
-        Ok(f)
+
+    pub fn config_path(mut self, path: &'a Path) -> Self {
+        self.config_path = Some(path);
+        self
+    }
+
+    pub fn cache_credentials_path(mut self, path: &'a Path) -> Self {
+        self.cache_credentials_path = Some(path);
+        self
+    }
+
+    pub fn build(self) -> Result<Flow<'a>, Error> {
+        Ok(Flow {
+            config_path: self
+                .config_path
+                .ok_or_else(|| Error::MissingRequiredAttribute("config_path".to_string()))?,
+            cache_credential_path: self.cache_credentials_path.ok_or_else(|| {
+                Error::MissingRequiredAttribute("cache_credential_path".to_string())
+            })?,
+            task_list: None,
+        })
     }
 }

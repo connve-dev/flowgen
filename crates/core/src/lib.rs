@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod config {
     pub mod input;
 }
@@ -22,5 +23,9 @@ pub mod task {
     pub mod generate {
         pub mod config;
         pub mod subscriber;
+    }
+    pub mod render {
+        pub mod config;
+        pub mod processor;
     }
 }
