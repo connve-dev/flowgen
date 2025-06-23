@@ -133,12 +133,15 @@ impl<T: Cache> flowgen_core::task::runner::Runner for Subscriber<T> {
                     .as_ref()
                     .filter(|opts| opts.enabled && !opts.managed_subscription)
                 {
-                    let reply_id = cache
-                        .get(&durable_consumer_opts.name)
-                        .await
-                        .map_err(|_| Error::Cache())?;
-                    fetch_request.replay_id = reply_id.into();
-                    fetch_request.replay_preset = 2
+                    match cache.get(&durable_consumer_opts.name).await {
+                        Ok(reply_id) => {
+                            fetch_request.replay_id = reply_id.into();
+                            fetch_request.replay_preset = 2
+                        }
+                        Err(err) => {
+                            println!("error")
+                        }
+                    }
                 }
 
                 let mut stream = pubsub

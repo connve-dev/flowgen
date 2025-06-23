@@ -147,7 +147,7 @@ impl EventHandler {
 
         // Deltatable supports Timestamp with Microseconds only.
         // We call this helper function to do event data adjustment.
-        event.adjust_data_precision().map_err(Error::Event)?;
+        event.normalize().map_err(Error::Event)?;
 
         // Match on operation and Append or Merge source data (event) into the target table.
         match self.config.operation {
@@ -265,7 +265,7 @@ impl<T: Cache> flowgen_core::task::runner::Runner for Writer<T> {
                     String::from_utf8(schema_bytes.to_vec()).map_err(Error::FromUtf8)?;
 
                 let schema: Schema = serde_json::from_str(&schema_str).map_err(Error::SerdeJson)?;
-                let new_schema = schema.adjust_data_precision().map_err(Error::Schema)?;
+                let new_schema = schema.normalize().map_err(Error::Schema)?;
                 let delta_schema = StructType::try_from(&new_schema).map_err(Error::Arrow)?;
 
                 let struct_fields: Vec<StructField> = delta_schema.fields().cloned().collect();

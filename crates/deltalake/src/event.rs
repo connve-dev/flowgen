@@ -1,4 +1,4 @@
-//! Utilities for adjusting Arrow data precision within events.
+//! Utilities for normalizing Arrow data within events.
 
 use deltalake::arrow::{
     array::{Array, RecordBatch, TimestampMicrosecondArray, TimestampMillisecondArray},
@@ -9,7 +9,7 @@ use std::sync::Arc;
 /// Default timezone setting for Timestamp columns.
 const DEFAULT_TIMESTAMP_TIMEZONE: &str = "UTC";
 
-/// Errors that can occur during event data processing and precision adjustment.
+/// Errors that can occur during event data processing and normalization.
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -27,21 +27,22 @@ pub trait EventExt {
     /// The error type for operations defined in this trait.
     type Error;
 
-    /// Adjusts the precision of timestamp data within the event.
+    /// Normalizes the data within the event.
     ///
-    /// Typically converts millisecond precision timestamps to microsecond precision.
-    fn adjust_data_precision(&mut self) -> Result<(), Self::Error>;
+    /// Converts millisecond precision timestamps to microsecond precision and removes null columns.
+    fn normalize(&mut self) -> Result<(), Self::Error>;
 }
 
 /// Implements `EventExt` for `flowgen_core::stream::event::Event`.
 impl EventExt for flowgen_core::stream::event::Event {
     type Error = Error;
 
-    /// Modifies the event's internal `RecordBatch` to adjust timestamp precision.
+    /// Modifies the event's internal `RecordBatch` to normalize data.
     ///
     /// This method iterates through columns:
     /// - If a column is `Timestamp(Millisecond, tz)`, it's converted to `Timestamp(Microsecond, tz)`.
     ///   Both the schema field and the array data (scaled by 1000) are updated.
+    /// - Columns with `DataType::Null` are removed entirely.
     /// - Other data types are preserved.
     ///   The event's `data` field is updated in place with the new `RecordBatch`.
     ///
@@ -49,16 +50,20 @@ impl EventExt for flowgen_core::stream::event::Event {
     /// Returns `Error::DowcastFailed` if a column typed as `TimestampMillisecond` in the schema
     /// cannot be downcast to `TimestampMillisecondArray`.
     /// Returns `Error::Arrow` if creating the new `RecordBatch` fails.
-    fn adjust_data_precision(&mut self) -> Result<(), Self::Error> {
+    fn normalize(&mut self) -> Result<(), Self::Error> {
         let columns = self.data.columns();
         let schema = self.data.schema();
 
-        // Prepare to build the new schema and columns.
-        let mut new_fields: Vec<Arc<Field>> = Vec::with_capacity(schema.fields().len());
-        let mut new_columns = Vec::with_capacity(columns.len());
+        // Prepare to build the new schema and columns, filtering out null columns.
+        let mut new_fields: Vec<Arc<Field>> = Vec::new();
+        let mut new_columns = Vec::new();
 
         for (i, field) in schema.fields().iter().enumerate() {
             match field.data_type() {
+                DataType::Null => {
+                    // Skip null columns entirely
+                    continue;
+                }
                 DataType::Timestamp(TimeUnit::Millisecond, _) => {
                     // Update schema field to microsecond precision.
                     new_fields.push(Arc::new(Field::new(
