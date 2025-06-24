@@ -59,7 +59,6 @@ pub struct Flow<'a> {
 
 impl Flow<'_> {
     pub async fn run(mut self) -> Result<Self, Error> {
-        println!("{:?}", "running");
         let c = std::fs::read_to_string(self.config_path).map_err(Error::OpenFile)?;
         let config: config::Config = serde_json::from_str(&c).map_err(Error::Serde)?;
 
