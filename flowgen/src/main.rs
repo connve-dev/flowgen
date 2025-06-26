@@ -28,6 +28,8 @@ async fn main() {
         }
     }
 
+    let mut config_handles = Vec::new();
+
     for config in glob(&config_dir).unwrap_or_else(|err| {
         error!("{:?}", err);
         process::exit(1);
@@ -37,23 +39,32 @@ async fn main() {
             process::exit(1);
         });
 
-        let f = flowgen::flow::FlowBuilder::new()
-            .config_path(&config_path)
-            .cache_credentials_path(&cache_credentials_path)
-            .build()
-            .unwrap_or_else(|err| {
-                error!("{:?}", err);
-                process::exit(1);
-            })
-            .run()
-            .await
-            .unwrap_or_else(|err| {
-                error!("{:?}", err);
-                process::exit(1);
-            });
+        let cache_credentials_path = cache_credentials_path.clone();
 
-        if let Some(tasks) = f.task_list {
-            futures_util::future::join_all(tasks).await;
-        }
+        let handle = tokio::spawn(async move {
+            let f = flowgen::flow::FlowBuilder::new()
+                .config_path(&config_path)
+                .cache_credentials_path(&cache_credentials_path)
+                .build()
+                .unwrap_or_else(|err| {
+                    error!("{:?}", err);
+                    process::exit(1);
+                })
+                .run()
+                .await
+                .unwrap_or_else(|err| {
+                    error!("{:?}", err);
+                    process::exit(1);
+                });
+
+            if let Some(tasks) = f.task_list {
+                futures_util::future::join_all(tasks).await;
+            }
+        });
+
+        config_handles.push(handle);
     }
+
+    // Wait for all configs to complete
+    futures_util::future::join_all(config_handles).await;
 }

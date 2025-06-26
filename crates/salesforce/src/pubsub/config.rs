@@ -5,15 +5,27 @@ use std::collections::HashMap;
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Subscriber {
+    pub label: Option<String>,
     pub credentials: String,
     pub topic_list: Vec<String>,
-    pub next_node: Option<String>,
+    pub durable_consumer_options: Option<DurableConsumerOptions>,
+    pub num_requested: Option<i32>,
+    pub endpoint: Option<String>,
 }
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Publisher {
+    pub label: Option<String>,
     pub credentials: String,
     pub topic: String,
     pub payload: Map<String, Value>,
     pub inputs: Option<HashMap<String, Input>>,
+    pub endpoint: Option<String>,
+}
+
+#[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
+pub struct DurableConsumerOptions {
+    pub enabled: bool,
+    pub managed_subscription: bool,
+    pub name: String,
 }
