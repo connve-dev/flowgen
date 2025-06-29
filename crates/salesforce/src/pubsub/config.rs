@@ -2,6 +2,7 @@ use flowgen_core::config::input::Input;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use flowgen_core::cache::CacheOptions;
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Subscriber {
@@ -11,6 +12,7 @@ pub struct Subscriber {
     pub durable_consumer_options: Option<DurableConsumerOptions>,
     pub num_requested: Option<i32>,
     pub endpoint: Option<String>,
+    pub cache_options: Option<CacheOptions>,
 }
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
