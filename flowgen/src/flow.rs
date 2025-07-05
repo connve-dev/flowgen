@@ -23,8 +23,13 @@ pub enum Error {
     SalesforcePubsubPublisher(#[from] flowgen_salesforce::pubsub::publisher::Error),
     #[error(transparent)]
     HttpProcessor(#[from] flowgen_http::processor::Error),
-    #[error(transparent)]
-    NatsJetStreamPublisher(#[from] flowgen_nats::jetstream::publisher::Error),
+    #[error("flow: {flow}, task_id: {task_id}, source: {source}")]
+    NatsJetStreamPublisher {
+        #[source]
+        source: flowgen_nats::jetstream::publisher::Error,
+        flow: String,
+        task_id: usize,
+    },
     #[error(transparent)]
     NatsJetStreamSubscriber(#[from] flowgen_nats::jetstream::subscriber::Error),
     #[error(transparent)]
@@ -217,10 +222,18 @@ impl Flow<'_> {
                             .current_task_id(i)
                             .build()
                             .await
-                            .map_err(Error::NatsJetStreamPublisher)?
+                            .map_err(|e| Error::NatsJetStreamPublisher {
+                                source: e,
+                                flow: "test".to_string(),
+                                task_id: i,
+                            })?
                             .run()
                             .await
-                            .map_err(Error::NatsJetStreamPublisher)?;
+                            .map_err(|e| Error::NatsJetStreamPublisher {
+                                source: e,
+                                flow: "test".to_string(),
+                                task_id: i,
+                            })?;
                         Ok(())
                     });
                     task_list.push(task);
