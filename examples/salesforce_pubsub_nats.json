@@ -1,5 +1,6 @@
 {
     "flow": {
+        "name": "salesforce_pubsub_subscriber_account",
         "tasks": [
             {
                 "salesforce_pubsub_subscriber": {

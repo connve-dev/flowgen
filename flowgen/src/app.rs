@@ -61,7 +61,7 @@ impl flowgen_core::task::runner::Runner for App {
         for config in flow_configs {
             let app_config = Arc::clone(&app_config);
             let handle = tokio::spawn(async move {
-                let mut flow_builder = super::flow::FlowBuilder::new().config(config);
+                let mut flow_builder = super::flow::FlowBuilder::new().config(Arc::new(config));
 
                 if let Some(cache) = &app_config.cache {
                     if cache.enabled {
@@ -156,6 +156,7 @@ mod tests {
     fn create_test_flow_config() -> String {
         r#"
         [flow]
+        name = "test_flow"
         tasks = []
         "#
         .to_string()
