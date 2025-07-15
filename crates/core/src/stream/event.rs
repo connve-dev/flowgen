@@ -5,17 +5,28 @@ pub enum Error {
     MissingRequiredAttribute(String),
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Event {
-    pub data: arrow::array::RecordBatch,
+    pub data: EventData,
     pub extensions: Option<arrow::array::RecordBatch>,
     pub subject: String,
     pub current_task_id: Option<usize>,
 }
 
-#[derive(PartialEq, Debug, Clone, Default)]
+#[derive(Debug, Clone)]
+pub enum EventData {
+    ArrowRecordBatch(arrow::array::RecordBatch),
+    Avro(AvroData),
+}
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AvroData {
+    pub schema: String,
+    pub raw_bytes: Vec<u8>,
+}
+
+#[derive(Default, Debug, Clone)]
 pub struct EventBuilder {
-    pub data: Option<arrow::array::RecordBatch>,
+    pub data: Option<EventData>,
     pub extensions: Option<arrow::array::RecordBatch>,
     pub subject: Option<String>,
     pub current_task_id: Option<usize>,
@@ -27,7 +38,7 @@ impl EventBuilder {
             ..Default::default()
         }
     }
-    pub fn data(mut self, data: arrow::array::RecordBatch) -> Self {
+    pub fn data(mut self, data: EventData) -> Self {
         self.data = Some(data);
         self
     }

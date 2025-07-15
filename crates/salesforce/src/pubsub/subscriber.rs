@@ -1,14 +1,11 @@
+use apache_avro::{types::Value as AvroValue, Schema};
 use flowgen_core::{
     cache::Cache,
     connect::client::Client,
-    convert::recordbatch::RecordBatchExt,
-    stream::event::{Event, EventBuilder},
+    stream::event::{AvroData, Event, EventBuilder, EventData},
 };
-use serde::Serialize;
-use bytes::Bytes;
 use salesforce_pubsub::eventbus::v1::{FetchRequest, SchemaRequest, TopicRequest};
-use serde_json::Value;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{broadcast::Sender, Mutex};
 use tokio_stream::StreamExt;
 use tracing::{event, Level};
@@ -72,7 +69,7 @@ impl<T: Cache> EventHandler<T> {
     /// Fetches topic and schema info, establishes subscription with optional
     /// replay ID, then processes incoming events in a loop.
     async fn handle(self) -> Result<(), Error> {
-        // Get topic metadata
+        // Get topic metadata.
         let topic_info = self
             .pubsub
             .lock()
@@ -84,7 +81,7 @@ impl<T: Cache> EventHandler<T> {
             .map_err(Error::SalesforcePubSub)?
             .into_inner();
 
-        // Get Avro schema for message deserialization
+        // Get schema for message deserialization.
         let schema_info = self
             .pubsub
             .lock()
@@ -96,13 +93,13 @@ impl<T: Cache> EventHandler<T> {
             .map_err(Error::SalesforcePubSub)?
             .into_inner();
 
-        // Set batch size for event fetching
+        // Set batch size for event fetching.
         let num_requested = match self.config.topic.num_requested {
             Some(num_requested) => num_requested,
             None => DEFAULT_NUM_REQUESTED,
         };
 
-        // Build fetch request
+        // Build fetch request.
         let topic_name = topic_info.topic_name.as_str();
         let mut fetch_request = FetchRequest {
             topic_name: topic_name.to_string(),
@@ -110,7 +107,7 @@ impl<T: Cache> EventHandler<T> {
             ..Default::default()
         };
 
-        // Set replay ID for durable consumers
+        // Set replay ID for durable consumers.
         if let Some(durable_consumer_opts) = self
             .config
             .topic
@@ -132,7 +129,7 @@ impl<T: Cache> EventHandler<T> {
             }
         }
 
-        // Subscribe to topic stream
+        // Subscribe to topic stream.
         let mut stream = self
             .pubsub
             .lock()
@@ -146,7 +143,7 @@ impl<T: Cache> EventHandler<T> {
             match event {
                 Ok(fr) => {
                     for ce in fr.events {
-                        // Cache replay ID for durable consumer recovery
+                        // Cache replay ID for durable consumer recovery.
                         if let Some(durable_consumer_opts) = self
                             .config
                             .topic
@@ -163,45 +160,10 @@ impl<T: Cache> EventHandler<T> {
                         }
 
                         if let Some(event) = ce.event {
-                            // Parse Avro schema
-                            let schema: serde_avro_fast::Schema =
-                                schema_info
-                                    .schema_json
-                                    .parse()
-                                    .map_err(Error::SerdeAvroSchema)?;
-
-                            let schema_as_string: String = format!("{:?}", schema);
-
-                            // Deserialize Avro payload
-                            let value = serde_avro_fast::from_datum_slice::<Value>(
-                                &event.payload[..],
-                                &schema,
-                            )
-                            .map_err(Error::SerdeAvroValue)?;
-
-                            // Convert to RecordBatch
-                            let recordbatch = value
-                                .to_string()
-                                .to_recordbatch()
-                                .map_err(Error::RecordBatch)?;
-
-                             // Cache schema for delta lake output
-                             if let Some(cache_options) = self
-                             .config
-                             .topic
-                             .cache_options
-                             .as_ref() {
-                                 if let Some(insert_key) = &cache_options.insert_key {
-                                     let schema_string = serde_json::to_string(&recordbatch.schema()).map_err(Error::Serde)?;
-                                     let schema_bytes = Bytes::from(schema_string);
-                                     self.cache
-                                         .put(insert_key.as_str(), schema_bytes)
-                                         .await
-                                         .map_err(|err| {
-                                             Error::Cache(format!("Failed to cache schema: {:?}", err))
-                                         })?;
-                                 }
-                             };
+                            let data = AvroData {
+                                schema: schema_info.schema_json.clone(),
+                                raw_bytes: event.payload[..].to_vec(),
+                            };
 
                             // Normalize topic name
                             let topic = topic_name.replace('/', ".").to_lowercase();
@@ -215,7 +177,7 @@ impl<T: Cache> EventHandler<T> {
 
                             // Build and send event
                             let e = EventBuilder::new()
-                                .data(recordbatch)
+                                .data(EventData::Avro(data))
                                 .subject(subject)
                                 .current_task_id(self.current_task_id)
                                 .build()

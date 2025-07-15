@@ -26,3 +26,4 @@ tokio = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 futures-util = { workspace = true }
+apache-avro = "0.19.0"

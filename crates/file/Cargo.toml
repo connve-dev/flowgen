@@ -21,3 +21,4 @@ serde_json = { workspace = true }
 futures = { workspace = true }
 arrow = { workspace = true }
 bytes = { workspace = true }
+apache-avro = { workspace = true }

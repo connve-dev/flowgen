@@ -1,7 +1,10 @@
 use arrow::csv::reader::Format;
 use async_nats::jetstream::{context::ObjectStoreErrorKind, object_store::GetErrorKind};
 use chrono::Utc;
-use flowgen_core::{connect::client::Client, stream::event::Event, stream::event::EventBuilder};
+use flowgen_core::{
+    connect::client::Client,
+    stream::event::{Event, EventBuilder, EventData},
+};
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::sync::broadcast::Sender;
@@ -104,7 +107,7 @@ impl Reader {
                     let subject =
                         format!("{}.{}.{}", DEFAULT_MESSAGE_SUBJECT, file_name, timestamp);
                     let e = EventBuilder::new()
-                        .data(recordbatch)
+                        .data(EventData::ArrowRecordBatch(recordbatch))
                         .subject(subject)
                         .current_task_id(self.current_task_id)
                         .build()

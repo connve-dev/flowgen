@@ -15,11 +15,11 @@
 //! All configurations require Salesforce credentials which should reference
 //! a credential store entry containing the necessary OAuth tokens and connection details.
 
+use flowgen_core::cache::CacheOptions;
 use flowgen_core::config::input::Input;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use flowgen_core::cache::CacheOptions;
 /// Configuration structure for Salesforce Pub/Sub subscriber operations.
 ///
 /// This structure defines all parameters needed to subscribe to Salesforce Pub/Sub topics,
@@ -140,8 +140,6 @@ pub struct Topic {
     pub durable_consumer_options: Option<DurableConsumerOptions>,
     /// Number of messages to request per batch (server default if not specified).
     pub num_requested: Option<i32>,
-    /// Optional caching configuration for schema storage and retrieval.
-    pub cache_options: Option<CacheOptions>,
 }
 
 /// Configuration structure for Salesforce Pub/Sub publisher operations.

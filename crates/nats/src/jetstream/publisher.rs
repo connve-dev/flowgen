@@ -20,9 +20,9 @@ pub enum Error {
     NatsRequest(#[from] async_nats::jetstream::context::RequestError),
     #[error(transparent)]
     NatsJetStreamEvent(#[from] super::message::Error),
-    #[error("missing required event attrubute")]
+    #[error("missing required event attribute")]
     MissingRequiredAttribute(String),
-    #[error("NATS Client is missing / not initialized properly")]
+    #[error("Nats client is missing / not initialized properly")]
     MissingNatsClient(),
 }
 

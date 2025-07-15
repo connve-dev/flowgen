@@ -1,7 +1,7 @@
 use chrono::Utc;
 use flowgen_core::{
     convert::{recordbatch::RecordBatchExt, render::Render},
-    stream::event::{Event, EventBuilder},
+    stream::event::{Event, EventBuilder, EventData},
 };
 use futures_util::future::try_join_all;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -93,10 +93,10 @@ impl flowgen_core::task::runner::Runner for Processor {
                     let mut data = Map::new();
                     if let Some(inputs) = &config.inputs {
                         for (key, input) in inputs {
-                            let value = input.extract(&event.data, &event.extensions);
-                            if let Ok(value) = value {
-                                data.insert(key.to_owned(), value);
-                            }
+                            // let value = input.extract(&event.data, &event.extensions);
+                            // if let Ok(value) = value {
+                            //     data.insert(key.to_owned(), value);
+                            // }
                         }
                     }
 
@@ -197,7 +197,7 @@ impl flowgen_core::task::runner::Runner for Processor {
 
                     // Send processor output as event.
                     let e = EventBuilder::new()
-                        .data(recordbatch)
+                        .data(EventData::ArrowRecordBatch(recordbatch))
                         .extensions(extensions)
                         .subject(subject)
                         .current_task_id(self.current_task_id)

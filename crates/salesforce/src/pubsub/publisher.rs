@@ -117,12 +117,12 @@ impl flowgen_core::task::runner::Runner for Publisher {
             if event.current_task_id == Some(self.current_task_id - 1) {
                 let mut data = Map::new();
                 if let Some(inputs) = &self.config.inputs {
-                    for (key, input) in inputs {
-                        let value = input.extract(&event.data, &event.extensions);
-                        if let Ok(value) = value {
-                            data.insert(key.to_owned(), value);
-                        }
-                    }
+                    // for (key, input) in inputs {
+                    //     let value = input.extract(&event.data, &event.extensions);
+                    //     if let Ok(value) = value {
+                    //         data.insert(key.to_owned(), value);
+                    //     }
+                    // }
                 }
 
                 let payload = self

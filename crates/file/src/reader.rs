@@ -29,7 +29,7 @@ use bytes::Bytes;
 use chrono::Utc;
 use flowgen_core::{
     cache::Cache,
-    stream::event::{Event, EventBuilder},
+    stream::event::{Event, EventBuilder, EventData},
 };
 use std::{fs::File, io::Seek, sync::Arc};
 use tokio::sync::broadcast::{Receiver, Sender};
@@ -198,7 +198,7 @@ impl<T: Cache> flowgen_core::task::runner::Runner for EventHandler<T> {
 
             // Create and send event.
             let e = EventBuilder::new()
-                .data(recordbatch)
+                .data(EventData::ArrowRecordBatch(recordbatch))
                 .subject(subject)
                 .current_task_id(self.current_task_id)
                 .build()

@@ -128,32 +128,29 @@ impl Flow<'_> {
         for (i, task) in self.config.flow.tasks.iter().enumerate() {
             match task {
                 Task::deltalake_writer(config) => {
-                    let config = Arc::new(config.to_owned());
-                    let rx = tx.subscribe();
-                    let cache = Arc::clone(&cache);
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_deltalake::writer::WriterBuilder::new()
-                            .config(config)
-                            .receiver(rx)
-                            .current_task_id(i)
-                            .cache(cache)
-                            .build()
-                            .map_err(|e| Error::DeltalakeWriter {
-                                source: e,
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::DeltalakeWriter {
-                                source: e,
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
-                        Ok(())
-                    });
-                    task_list.push(task);
+                    todo!();
+                    // let config = Arc::new(config.to_owned());
+                    // let rx = tx.subscribe();
+                    // let cache = Arc::clone(&cache);
+                    // let flow_config = Arc::clone(&self.config);
+                    // let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                    //     flowgen_deltalake::writer::WriterBuilder::new()
+                    //         .config(config)
+                    //         .receiver(rx)
+                    //         .current_task_id(i)
+                    //         .cache(cache)
+                    //         .build()
+                    //         .map_err(|e| Error::DeltalakeWriter {
+                    //             source: e,
+                    //             flow: flow_config.flow.name.to_owned(),
+                    //             task_id: i,
+                    //         })?
+                    //         .run()
+                    //         .await
+                    //         .unwrap();
+                    //     Ok(())
+                    // });
+                    // task_list.push(task);
                 }
 
                 Task::enumerate(config) => {
@@ -438,36 +435,36 @@ impl Flow<'_> {
                     });
                     task_list.push(task);
                 }
-                Task::render(config) => {
-                    let config = Arc::new(config.to_owned());
-                    let rx = tx.subscribe();
-                    let tx = tx.clone();
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_core::task::render::processor::ProcessorBuilder::new()
-                            .config(config)
-                            .receiver(rx)
-                            .sender(tx)
-                            .current_task_id(i)
-                            .build()
-                            .await
-                            .map_err(|e| Error::RenderProcessor {
-                                source: e,
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::RenderProcessor {
-                                source: e,
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
+                Task::render(config) => todo!(), // Task::render(config) => {
+                                                 //     let config = Arc::new(config.to_owned());
+                                                 //     let rx = tx.subscribe();
+                                                 //     let tx = tx.clone();
+                                                 //     let flow_config = Arc::clone(&self.config);
+                                                 //     let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                                                 //         flowgen_core::task::render::processor::ProcessorBuilder::new()
+                                                 //             .config(config)
+                                                 //             .receiver(rx)
+                                                 //             .sender(tx)
+                                                 //             .current_task_id(i)
+                                                 //             .build()
+                                                 //             .await
+                                                 //             .map_err(|e| Error::RenderProcessor {
+                                                 //                 source: e,
+                                                 //                 flow: flow_config.flow.name.to_owned(),
+                                                 //                 task_id: i,
+                                                 //             })?
+                                                 //             .run()
+                                                 //             .await
+                                                 //             .map_err(|e| Error::RenderProcessor {
+                                                 //                 source: e,
+                                                 //                 flow: flow_config.flow.name.to_owned(),
+                                                 //                 task_id: i,
+                                                 //             })?;
 
-                        Ok(())
-                    });
-                    task_list.push(task);
-                }
+                                                 //         Ok(())
+                                                 //     });
+                                                 //     task_list.push(task);
+                                                 // }
             }
         }
         self.task_list = Some(task_list);

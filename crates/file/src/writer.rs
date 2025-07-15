@@ -21,7 +21,7 @@
 //! 5. `EventHandler::run` creates a timestamped filename, writes the RecordBatch data to a CSV file,
 //!    and logs the successful operation.
 //! 6. Errors during file operations or event processing are logged using the `tracing` crate.
-
+use apache_avro::from_avro_datum;
 use chrono::Utc;
 use flowgen_core::stream::event::Event;
 use std::{fs::File, sync::Arc};
@@ -35,19 +35,16 @@ const DEFAULT_MESSAGE_SUBJECT: &str = "file.writer";
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
-    /// Error originating from I/O operations (file creation, writing, etc.).
-    #[error("error opening/creating file")]
-    IO(#[source] std::io::Error),
-    /// Error originating from the Apache Arrow crate (CSV writing, data serialization).
-    #[error("error deserializing data into binary format")]
-    Arrow(#[source] arrow::error::ArrowError),
-    /// An expected attribute or configuration value was missing.
+    #[error(transparent)]
+    IO(#[from] std::io::Error),
+    #[error(transparent)]
+    Arrow(#[from] arrow::error::ArrowError),
+    #[error(transparent)]
+    Avro(#[from] apache_avro::Error),
     #[error("missing required event attrubute")]
     MissingRequiredAttribute(String),
-    /// Could not extract a filename from the configured file path.
     #[error("no filename in provided path")]
     EmptyFileName(),
-    /// An expected string value was empty (e.g., filename conversion).
     #[error("no value in provided str")]
     EmptyStr(),
 }
@@ -90,7 +87,6 @@ impl EventHandler {
     /// * `Ok(())` if the event was processed and written successfully.
     /// * `Err(Error)` if any error occurred during processing or writing.
     async fn handle(self, event: Event) -> Result<(), Error> {
-        // Extract filename stem and extension from the configured path.
         let file_stem = self
             .config
             .path
@@ -107,26 +103,30 @@ impl EventHandler {
             .to_str()
             .ok_or_else(Error::EmptyStr)?;
 
-        // Generate a unique timestamped filename.
         let timestamp = Utc::now().timestamp_micros();
-        let filename = format!("{}.{}.{}", file_stem, timestamp, file_ext);
-
-        // Create the output file and write the RecordBatch data as CSV.
+        let filename = format!("{file_stem}.{timestamp}.{file_ext}");
         let file = File::create(filename).map_err(Error::IO)?;
 
-        arrow::csv::WriterBuilder::new()
-            .with_header(true)
-            .build(file)
-            .write(&event.data)
-            .map_err(Error::Arrow)?;
+        match &event.data {
+            flowgen_core::stream::event::EventData::ArrowRecordBatch(data) => {
+                arrow::csv::WriterBuilder::new()
+                    .with_header(true)
+                    .build(file)
+                    .write(data)
+                    .map_err(Error::Arrow)?;
+            }
+            flowgen_core::stream::event::EventData::Avro(data) => {
+                let schema = apache_avro::Schema::parse_str(&data.schema).map_err(Error::Avro)?;
+                let value = from_avro_datum(&schema, &mut &data.raw_bytes[..], None)
+                    .map_err(Error::Avro)?;
+                let mut writer = apache_avro::Writer::new(&schema, file);
+                writer.append(value).map_err(Error::Avro)?;
+                writer.flush().map_err(Error::Avro)?;
+            }
+        }
 
-        // Generate event subject and log successful processing.
-        let subject = format!(
-            "{}.{}.{}.{}",
-            DEFAULT_MESSAGE_SUBJECT, file_stem, timestamp, file_ext
-        );
+        let subject = format!("{DEFAULT_MESSAGE_SUBJECT}.{file_stem}.{timestamp}.{file_ext}");
         event!(Level::INFO, "event processed: {}", subject);
-
         Ok(())
     }
 }

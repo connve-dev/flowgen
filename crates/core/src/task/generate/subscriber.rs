@@ -1,6 +1,6 @@
 use crate::{
     convert::recordbatch::RecordBatchExt,
-    stream::event::{Event, EventBuilder},
+    stream::event::{Event, EventBuilder, EventData},
 };
 use chrono::Utc;
 use std::{sync::Arc, time::Duration};
@@ -52,7 +52,7 @@ impl crate::task::runner::Runner for Subscriber {
                 .map_err(Error::RecordBatch)?;
 
             let e = EventBuilder::new()
-                .data(recordbatch)
+                .data(EventData::ArrowRecordBatch(recordbatch))
                 .subject(subject)
                 .current_task_id(self.current_task_id)
                 .build()

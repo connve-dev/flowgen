@@ -34,44 +34,44 @@ impl crate::task::runner::Runner for Processor {
     async fn run(mut self) -> Result<(), Error> {
         while let Ok(event) = self.rx.recv().await {
             if event.current_task_id == Some(self.current_task_id - 1) {
-                let data = self.config.array.extract(&event.data, &event.extensions);
-                if let Ok(data) = data {
-                    let arr = data
-                        .as_array()
-                        .ok_or_else(Error::EmptyArray)?
-                        .iter()
-                        .enumerate();
+                // let data = self.config.array.extract(&event.data, &event.extensions);
+                // if let Ok(data) = data {
+                //     let arr = data
+                //         .as_array()
+                //         .ok_or_else(Error::EmptyArray)?
+                //         .iter()
+                //         .enumerate();
 
-                    for (i, el) in arr {
-                        let recordbatch = el
-                            .to_string()
-                            .to_recordbatch()
-                            .map_err(Error::RecordBatch)?;
-                        let timestamp = Utc::now().timestamp_micros();
-                        let subject = match &self.config.label {
-                            Some(label) => format!(
-                                "{}.{}.{}.{}",
-                                DEFAULT_MESSAGE_SUBJECT,
-                                label.to_lowercase(),
-                                i,
-                                timestamp
-                            ),
-                            None => format!("{}.{}.{}", DEFAULT_MESSAGE_SUBJECT, i, timestamp),
-                        };
+                //     for (i, el) in arr {
+                //         let recordbatch = el
+                //             .to_string()
+                //             .to_recordbatch()
+                //             .map_err(Error::RecordBatch)?;
+                //         let timestamp = Utc::now().timestamp_micros();
+                //         let subject = match &self.config.label {
+                //             Some(label) => format!(
+                //                 "{}.{}.{}.{}",
+                //                 DEFAULT_MESSAGE_SUBJECT,
+                //                 label.to_lowercase(),
+                //                 i,
+                //                 timestamp
+                //             ),
+                //             None => format!("{}.{}.{}", DEFAULT_MESSAGE_SUBJECT, i, timestamp),
+                //         };
 
-                        let e = EventBuilder::new()
-                            .data(recordbatch)
-                            .subject(subject)
-                            .current_task_id(self.current_task_id)
-                            .build()
-                            .map_err(Error::Event)?;
+                //         let e = EventBuilder::new()
+                //             .data(recordbatch)
+                //             .subject(subject)
+                //             .current_task_id(self.current_task_id)
+                //             .build()
+                //             .map_err(Error::Event)?;
 
-                        event!(Level::INFO, "event processed: {}", e.subject);
-                        self.tx.send(e).map_err(Error::SendMessage)?;
-                    }
-                }
-                // }
+                //         event!(Level::INFO, "event processed: {}", e.subject);
+                //         self.tx.send(e).map_err(Error::SendMessage)?;
+                //     }
             }
+            // }
+            // }
         }
 
         Ok(())

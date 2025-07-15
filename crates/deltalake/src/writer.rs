@@ -151,58 +151,58 @@ impl EventHandler {
         event.normalize().map_err(Error::Event)?;
 
         // Match on operation and Append or Merge source data (event) into the target table.
-        match self.config.operation {
-            crate::config::Operation::Append => {
-                let mut writer = RecordBatchWriter::for_table(table)
-                    .map_err(Error::DeltaTable)?
-                    .with_writer_properties(writer_properties);
+        // match self.config.operation {
+        //     crate::config::Operation::Append => {
+        //         let mut writer = RecordBatchWriter::for_table(table)
+        //             .map_err(Error::DeltaTable)?
+        //             .with_writer_properties(writer_properties);
 
-                writer.write(event.data).await.map_err(Error::DeltaTable)?;
-                writer
-                    .flush_and_commit(table)
-                    .await
-                    .map_err(Error::DeltaTable)?;
-            }
-            crate::config::Operation::Merge => {
-                let ctx = SessionContext::new();
-                let schema = event.data.schema();
-                let provider = MemTable::try_new(schema.clone(), vec![vec![event.data]])
-                    .map_err(Error::DataFusion)?;
-                ctx.register_table(DEFAULT_SOURCE_ALIAS, Arc::new(provider))
-                    .map_err(Error::DataFusion)?;
-                let df = ctx
-                    .table(DEFAULT_SOURCE_ALIAS)
-                    .await
-                    .map_err(Error::DataFusion)?;
+        //         writer.write(event.data).await.map_err(Error::DeltaTable)?;
+        //         writer
+        //             .flush_and_commit(table)
+        //             .await
+        //             .map_err(Error::DeltaTable)?;
+        //     }
+        //     crate::config::Operation::Merge => {
+        //         let ctx = SessionContext::new();
+        //         let schema = event.data.schema();
+        //         let provider = MemTable::try_new(schema.clone(), vec![vec![event.data]])
+        //             .map_err(Error::DataFusion)?;
+        //         ctx.register_table(DEFAULT_SOURCE_ALIAS, Arc::new(provider))
+        //             .map_err(Error::DataFusion)?;
+        //         let df = ctx
+        //             .table(DEFAULT_SOURCE_ALIAS)
+        //             .await
+        //             .map_err(Error::DataFusion)?;
 
-                let predicate = self
-                    .config
-                    .predicate
-                    .clone()
-                    .ok_or_else(|| Error::MissingRequiredAttribute("predicate".to_string()))?;
+        //         let predicate = self
+        //             .config
+        //             .predicate
+        //             .clone()
+        //             .ok_or_else(|| Error::MissingRequiredAttribute("predicate".to_string()))?;
 
-                let column_names: Vec<String> = schema
-                    .fields()
-                    .iter()
-                    .map(|field| field.name().clone())
-                    .collect();
+        //         let column_names: Vec<String> = schema
+        //             .fields()
+        //             .iter()
+        //             .map(|field| field.name().clone())
+        //             .collect();
 
-                ops.merge(df, predicate)
-                    .with_source_alias(DEFAULT_SOURCE_ALIAS)
-                    .with_target_alias(DEFAULT_TARGET_ALIAS)
-                    .with_writer_properties(writer_properties)
-                    .when_not_matched_insert(|insert| {
-                        column_names.iter().fold(insert, |acc, col_name| {
-                            let qualified_col =
-                                Expr::Column(Column::new(Some(DEFAULT_SOURCE_ALIAS), col_name));
-                            acc.set(col_name, qualified_col)
-                        })
-                    })?
-                    .with_streaming(true)
-                    .await
-                    .map_err(Error::DeltaTable)?;
-            }
-        }
+        //         ops.merge(df, predicate)
+        //             .with_source_alias(DEFAULT_SOURCE_ALIAS)
+        //             .with_target_alias(DEFAULT_TARGET_ALIAS)
+        //             .with_writer_properties(writer_properties)
+        //             .when_not_matched_insert(|insert| {
+        //                 column_names.iter().fold(insert, |acc, col_name| {
+        //                     let qualified_col =
+        //                         Expr::Column(Column::new(Some(DEFAULT_SOURCE_ALIAS), col_name));
+        //                     acc.set(col_name, qualified_col)
+        //                 })
+        //             })?
+        //             .with_streaming(true)
+        //             .await
+        //             .map_err(Error::DeltaTable)?;
+        //     }
+        // }
 
         // Setup logging elements and log info in case of sucessfull table operation.
         let file_stem = self
