@@ -1,5 +1,5 @@
 use arrow::ipc::{reader::StreamDecoder, writer::StreamWriter};
-use async_nats::{jetstream::context::Publish, HeaderName};
+use async_nats::jetstream::context::Publish;
 use bincode::{deserialize, serialize};
 use flowgen_core::stream::event::{AvroData, EventBuilder, EventData};
 

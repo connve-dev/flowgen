@@ -1,3 +1,5 @@
+use chrono::Utc;
+
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -12,6 +14,7 @@ pub struct Event {
     pub subject: String,
     pub current_task_id: Option<usize>,
     pub id: Option<String>,
+    pub timestamp: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -32,11 +35,13 @@ pub struct EventBuilder {
     pub subject: Option<String>,
     pub current_task_id: Option<usize>,
     pub id: Option<String>,
+    pub timestamp: i64,
 }
 
 impl EventBuilder {
     pub fn new() -> Self {
         EventBuilder {
+            timestamp: Utc::now().timestamp_micros(),
             ..Default::default()
         }
     }
@@ -56,10 +61,15 @@ impl EventBuilder {
         self.id = Some(id);
         self
     }
+    pub fn timestamp(mut self, timestamp: i64) -> Self {
+        self.timestamp = timestamp;
+        self
+    }
     pub fn extensions(mut self, extensions: arrow::array::RecordBatch) -> Self {
         self.extensions = Some(extensions);
         self
     }
+
     pub fn build(self) -> Result<Event, Error> {
         Ok(Event {
             data: self
@@ -70,6 +80,7 @@ impl EventBuilder {
                 .subject
                 .ok_or_else(|| Error::MissingRequiredAttribute("subject".to_string()))?,
             id: self.id,
+            timestamp: self.timestamp,
             current_task_id: self.current_task_id,
         })
     }
