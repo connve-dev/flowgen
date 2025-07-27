@@ -38,22 +38,20 @@ pub enum Error {
     Event(#[from] flowgen_core::event::Error),
     #[error(transparent)]
     SerdeJson(#[from] serde_json::Error),
-    #[error("error with processing recordbatch")]
-    RecordBatch(#[source] flowgen_core::convert::recordbatch::Error),
     #[error(transparent)]
-    Render(#[from] flowgen_core::config::Error),
+    RecordBatch(#[from] flowgen_core::convert::recordbatch::Error),
+    #[error(transparent)]
+    ConfigRender(#[from] flowgen_core::config::Error),
     #[error(transparent)]
     Reqwest(#[from] reqwest::Error),
     #[error(transparent)]
     ReqwestInvalidHeaderName(#[from] reqwest::header::InvalidHeaderName),
     #[error(transparent)]
     ReqwestInvalidHeaderValue(#[from] reqwest::header::InvalidHeaderValue),
-    #[error("missing required attrubute")]
+    #[error("missing required attribute")]
     MissingRequiredAttribute(String),
     #[error("provided attribute not found")]
     NotFound(),
-    #[error("error parsing string to json")]
-    ParseJson(),
     #[error("either payload json or payload input is required")]
     PayloadConfig(),
 }
@@ -73,7 +71,7 @@ struct EventHandler {
 impl EventHandler {
     /// Processes an event and writes it to the configured object store.
     async fn handle(self, event: Event) -> Result<(), Error> {
-        let config = self.config.render(&event.data).unwrap();
+        let config = self.config.render(&event.data)?;
 
         // Setup http client with endpoint according to chosen method.
         let mut client = match config.method {
@@ -89,10 +87,8 @@ impl EventHandler {
         if let Some(headers) = self.config.headers.to_owned() {
             let mut header_map = HeaderMap::new();
             for (key, value) in headers {
-                let header_name =
-                    HeaderName::try_from(key).map_err(Error::ReqwestInvalidHeaderName)?;
-                let header_value =
-                    HeaderValue::try_from(value).map_err(Error::ReqwestInvalidHeaderValue)?;
+                let header_name = HeaderName::try_from(key)?;
+                let header_value = HeaderValue::try_from(value)?;
                 header_map.insert(header_name, header_value);
             }
             client = client.headers(header_map);
@@ -117,9 +113,8 @@ impl EventHandler {
 
         // Set client auth method & credentials.
         if let Some(credentials) = &self.config.credentials {
-            let credentials_string = fs::read_to_string(credentials).await.map_err(Error::IO)?;
-            let credentials: Credentials =
-                serde_json::from_str(&credentials_string).map_err(Error::SerdeJson)?;
+            let credentials_string = fs::read_to_string(credentials).await?;
+            let credentials: Credentials = serde_json::from_str(&credentials_string)?;
 
             if let Some(bearer_token) = credentials.bearer_auth {
                 client = client.bearer_auth(bearer_token);
@@ -131,16 +126,10 @@ impl EventHandler {
         };
 
         // Do API Call.
-        let resp = client
-            .send()
-            .await
-            .map_err(Error::Reqwest)?
-            .text()
-            .await
-            .map_err(Error::Reqwest)?;
+        let resp = client.send().await?.text().await?;
 
         // Prepare processor output.
-        let recordbatch = resp.to_recordbatch().map_err(Error::RecordBatch)?;
+        let recordbatch = resp.to_recordbatch()?;
 
         let timestamp = Utc::now().timestamp_micros();
         let subject = match &self.config.label {
@@ -158,10 +147,9 @@ impl EventHandler {
             .data(EventData::ArrowRecordBatch(recordbatch))
             .subject(subject.clone())
             .current_task_id(self.current_task_id)
-            .build()
-            .map_err(Error::Event)?;
+            .build()?;
 
-        self.tx.send(e).map_err(Error::SendMessage)?;
+        self.tx.send(e)?;
         event!(Level::INFO, "event processes: {}", subject);
         Ok(())
     }
@@ -177,10 +165,7 @@ pub struct Processor {
 impl flowgen_core::task::runner::Runner for Processor {
     type Error = Error;
     async fn run(mut self) -> Result<(), Error> {
-        let client = reqwest::ClientBuilder::new()
-            .https_only(true)
-            .build()
-            .map_err(Error::Reqwest)?;
+        let client = reqwest::ClientBuilder::new().https_only(true).build()?;
 
         let client = Arc::new(client);
 
