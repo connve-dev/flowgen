@@ -78,7 +78,7 @@ impl Serialize for EventData {
 }
 
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct EventBuilder {
     pub data: Option<EventData>,
     pub extensions: Option<arrow::array::RecordBatch>,

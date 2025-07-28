@@ -1901,7 +1901,6 @@ dependencies = [
  "config",
  "flowgen_core",
  "flowgen_deltalake",
- "flowgen_file",
  "flowgen_http",
  "flowgen_nats",
  "flowgen_object_store",
@@ -1955,22 +1954,6 @@ dependencies = [
  "futures-util",
  "handlebars",
  "reqwest 0.12.15",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "flowgen_file"
-version = "0.0.1"
-dependencies = [
- "apache-avro",
- "arrow",
- "bytes",
- "chrono",
- "flowgen_core",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

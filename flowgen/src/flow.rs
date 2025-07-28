@@ -7,8 +7,8 @@ use tokio::{
 };
 use tracing::error;
 
-/// Default alias for the source data (in-memory table) in MERGE operations.
-const DEFAULT_CACHE_NAME: &str = "flowgen_cache";
+/// Default cache object bucket name.
+const DEFAULT_CACHE_NAME: &'static str = "flowgen_cache";
 
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
@@ -62,12 +62,10 @@ pub enum Error {
         flow: String,
         task_id: usize,
     },
-    #[error(transparent)]
-    Cache(#[from] flowgen_nats::cache::Error),
     #[error("flow: {flow}, task_id: {task_id}, source: {source}")]
-    FileReader {
+    ObjectStoreReader {
         #[source]
-        source: flowgen_file::reader::Error,
+        source: flowgen_object_store::reader::Error,
         flow: String,
         task_id: usize,
     },
@@ -85,8 +83,10 @@ pub enum Error {
         flow: String,
         task_id: usize,
     },
-    #[error("missing required event attribute")]
+    #[error("missing required event attribute: {}", 1)]
     MissingRequiredAttribute(String),
+    #[error(transparent)]
+    Cache(#[from] flowgen_nats::cache::Error),
 }
 
 #[derive(Debug)]
@@ -113,8 +113,8 @@ impl Flow<'_> {
 
         for (i, task) in self.config.flow.tasks.iter().enumerate() {
             match task {
-                Task::deltalake_writer(config) => {
-                    todo!();
+                // Task::deltalake_writer(config) => {
+                    // todo!();
                     // let config = Arc::new(config.to_owned());
                     // let rx = tx.subscribe();
                     // let cache = Arc::clone(&cache);
@@ -137,7 +137,7 @@ impl Flow<'_> {
                     //     Ok(())
                     // });
                     // task_list.push(task);
-                }
+                // }
                 Task::enumerate(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
@@ -168,37 +168,6 @@ impl Flow<'_> {
                     });
                     task_list.push(task);
                 }
-                Task::file_reader(config) => {
-                    let config = Arc::new(config.to_owned());
-                    let rx = tx.subscribe();
-                    let tx = tx.clone();
-                    let cache = Arc::clone(&cache);
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_file::reader::ReaderBuilder::new()
-                            .config(config)
-                            .sender(tx)
-                            .receiver(rx)
-                            .cache(cache)
-                            .current_task_id(i)
-                            .build()
-                            .await
-                            .map_err(|e| Error::FileReader {
-                                source: e,
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::FileReader {
-                                source: e,
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
-                        Ok(())
-                    });
-                    task_list.push(task);
-                },
                 Task::generate(config) => {
                     let config = Arc::new(config.to_owned());
                     let tx = tx.clone();
@@ -365,7 +334,38 @@ impl Flow<'_> {
                         Ok(())
                     });
                     task_list.push(task);
-                }
+                },
+                Task::object_store_reader(config) => {
+                    let config = Arc::new(config.to_owned());
+                    let rx = tx.subscribe();
+                    let tx = tx.clone();
+                    let cache = Arc::clone(&cache);
+                    let flow_config = Arc::clone(&self.config);
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                        flowgen_object_store::reader::ReaderBuilder::new()
+                            .config(config)
+                            .sender(tx)
+                            .receiver(rx)
+                            .cache(cache)
+                            .current_task_id(i)
+                            .build()
+                            .await
+                            .map_err(|e| Error::ObjectStoreReader {
+                                source: e,
+                                flow: flow_config.flow.name.to_owned(),
+                                task_id: i,
+                            })?
+                            .run()
+                            .await
+                            .map_err(|e| Error::ObjectStoreReader {
+                                source: e,
+                                flow: flow_config.flow.name.to_owned(),
+                                task_id: i,
+                            })?;
+                        Ok(())
+                    });
+                    task_list.push(task);
+                },
                 Task::object_store_writer(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();

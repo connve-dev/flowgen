@@ -7,15 +7,10 @@ use object_store::PutPayload;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast::Receiver, Mutex};
 use tracing::{event, Level};
+use super::config::{DEFAULT_AVRO_EXTENSION, DEFAULT_JSON_EXTENSION, DEFAULT_CSV_EXTENSION};
 
 /// Default subject prefix for logging messages.
-const DEFAULT_MESSAGE_SUBJECT: &str = "object_store.writer";
-/// File extension for Avro format files.
-const DEFAULT_AVRO_EXTENSION: &str = "avro";
-/// File extension for CSV format files.
-const DEFAULT_CSV_EXTENSION: &str = "csv";
-/// File extension for JSON format files.
-const DEFAULT_JSON_EXTENSION: &str = "json";
+const DEFAULT_MESSAGE_SUBJECT: &'static str = "object_store.writer";
 
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
@@ -32,7 +27,7 @@ pub enum Error {
     ObjectStore(#[from] object_store::Error),
     #[error(transparent)]
     ObjectStoreClient(#[from] super::client::Error),
-    #[error("missing required attribute")]
+    #[error("missing required attribute: {}", 1)]
     MissingRequiredAttribute(String),
     #[error("could not initialize object store context")]
     NoObjectStoreContext(),
@@ -114,7 +109,6 @@ impl EventHandler {
             };
         // Upload processed data to object store.
         let payload = PutPayload::from_bytes(Bytes::from(writer));
-        println!("{:?}", payload);
         context
             .object_store
             .put(&object_path, payload)

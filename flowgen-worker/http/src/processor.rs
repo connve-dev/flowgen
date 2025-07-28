@@ -13,7 +13,7 @@ use tokio::{
 };
 use tracing::{event, Level};
 
-const DEFAULT_MESSAGE_SUBJECT: &str = "http.response";
+const DEFAULT_MESSAGE_SUBJECT: &'static str = "http.response";
 
 #[derive(Deserialize, Serialize, PartialEq, Clone, Debug, Default)]
 struct Credentials {
@@ -37,8 +37,6 @@ pub enum Error {
     Event(#[from] flowgen_core::event::Error),
     #[error(transparent)]
     SerdeJson(#[from] serde_json::Error),
-    #[error(transparent)]
-    RecordBatch(#[from] flowgen_core::convert::recordbatch::Error),
     #[error(transparent)]
     ConfigRender(#[from] flowgen_core::config::Error),
     #[error(transparent)]
@@ -149,7 +147,7 @@ impl EventHandler {
             .build()?;
 
         self.tx.send(e)?;
-        event!(Level::INFO, "event processes: {}", subject);
+        event!(Level::INFO, "event processeds: {}", subject);
         Ok(())
     }
 }

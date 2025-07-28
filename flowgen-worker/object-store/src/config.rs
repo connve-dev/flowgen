@@ -3,9 +3,16 @@
 //! Defines settings for CSV file reading and writing, including batch sizes,
 //! headers, caching, and file paths.
 
-use flowgen_core::cache::CacheOptions;
+use flowgen_core::{cache::CacheOptions, config::ConfigExt};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
+
+/// File extension for Avro format files.
+pub const DEFAULT_AVRO_EXTENSION: &'static str = "avro";
+/// File extension for CSV format files.
+pub const DEFAULT_CSV_EXTENSION: &'static str = "csv";
+/// File extension for JSON format files.
+pub const DEFAULT_JSON_EXTENSION: &'static str = "json";
 
 /// Object Store reader configuration.
 #[derive(PartialEq, Default, Clone, Debug, Deserialize, Serialize)]
@@ -14,6 +21,10 @@ pub struct Reader {
     pub label: Option<String>,
     /// Path to the object store or file location.
     pub path: PathBuf,
+    /// Optional path to credentials file.
+    pub credentials: Option<PathBuf>,
+   /// Additional client connection options.
+    pub client_options: Option<HashMap<String, String>>,
     /// Number of records to process in each batch.
     pub batch_size: Option<usize>,
     /// Whether the input data has a header row.
@@ -22,12 +33,15 @@ pub struct Reader {
     pub cache_options: Option<CacheOptions>,
 }
 
+
 /// Object Store writer configuration.
 #[derive(PartialEq, Default, Clone, Debug, Deserialize, Serialize)]
 pub struct Writer {
+    // Optional label for identifying the writer.
+    pub label: Option<String>,
     /// Path to the object store or output location.
     pub path: PathBuf,
-    /// Optional path to service account credentials file.
+    /// Optional path to credentials file.
     pub credentials: Option<PathBuf>,
     /// Additional client connection options.
     pub client_options: Option<HashMap<String, String>>,
@@ -51,3 +65,7 @@ pub enum HiveParitionKeys {
     #[default]
     EventDate,
 }
+
+/// Implement default ConfigExt traits.
+impl ConfigExt for Reader{}
+impl ConfigExt for Writer{}

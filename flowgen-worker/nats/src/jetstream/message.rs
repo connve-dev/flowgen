@@ -38,17 +38,16 @@ impl FlowgenMessageExt for flowgen_core::event::Event {
             EventData::ArrowRecordBatch(data) => {
                         let buffer: Vec<u8> = Vec::new();
                         let mut stream_writer =
-                            StreamWriter::try_new(buffer, &data.schema()).map_err(Error::Arrow)?;
-                        stream_writer.write(data).map_err(Error::Arrow)?;
-                        stream_writer.finish().map_err(Error::Arrow)?;
+                            StreamWriter::try_new(buffer, &data.schema())?;
+                        stream_writer.write(data)?;
+                        stream_writer.finish()?;
                         let serialized = serialize(stream_writer.get_mut())?;
                         event = event.payload(serialized.into());
                     }
-            EventData::Avro(data) => {
+            data=> {
                         let serialized = serialize(&data)?;
                         event = event.payload(serialized.into());
                     },
-            EventData::Json(value) => todo!(),
         }
         Ok(event)
     }
@@ -75,7 +74,7 @@ impl NatsMessageExt for async_nats::Message {
                     .map_err(Error::Arrow)?
                     .ok_or_else(Error::NoRecordBatch)?;
 
-                decoder.finish().map_err(Error::Arrow)?;
+                decoder.finish()?;
                 EventData::ArrowRecordBatch(recordbatch)
             }
         };

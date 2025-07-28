@@ -7,7 +7,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::broadcast::Sender, time};
 use tracing::{event, Level};
 
-const DEFAULT_MESSAGE_SUBJECT: &str = "generate";
+const DEFAULT_MESSAGE_SUBJECT: &'static str = "generate";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -17,7 +17,7 @@ pub enum Error {
     Event(#[from] crate::event::Error),
     #[error(transparent)]
     RecordBatch(#[from] crate::convert::recordbatch::Error),
-    #[error("missing required attrubute")]
+    #[error("missing required attribute")]
     MissingRequiredAttribute(String),
 }
 pub struct Subscriber {
