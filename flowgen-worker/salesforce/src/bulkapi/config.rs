@@ -62,18 +62,26 @@ pub struct Processor {
 pub enum Operation {
     /// Defaults to query job.
     #[default]
+    #[serde(rename = "query")]
     Query,
+    #[serde(rename = "queryAll")]
     QueryAll,
+    #[serde(rename = "insert")]
     Insert,
+    #[serde(rename = "delete")]
     Delete,
+    #[serde(rename = "hardDelete")]
     HardDelete,
+    #[serde(rename = "update")]
     Update,
+    #[serde(rename = "upsert")]
     Upsert,
 }
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
 pub enum ContentType {
     #[default]
+    #[serde(rename = "CSV")]
     Csv, /// Currently only supports CSV.
 }
 
@@ -81,11 +89,17 @@ pub enum ContentType {
 pub enum ColumnDelimiter {
     /// Defaults to comma as column delimiter.
     #[default]
+    #[serde(rename = "COMMA")]
     Comma,
+    #[serde(rename = "TAB")]
     Tab,
+    #[serde(rename = "SEMICOLON")]
     Semicolon,
+    #[serde(rename = "PIPE")]
     Pipe,
+    #[serde(rename = "CARET")]
     Caret,
+    #[serde(rename = "BACKQUOTE")]
     Backquote,
 }
 
@@ -93,7 +107,9 @@ pub enum ColumnDelimiter {
 enum LineEnding {
     /// Defaults to CRLF as line ending.
     #[default]
+    #[serde(rename = "LF")]
     Lf,
+    #[serde(rename = "CRLF")]
     Crlf,
 }
 
