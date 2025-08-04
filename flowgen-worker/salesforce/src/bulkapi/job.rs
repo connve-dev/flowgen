@@ -17,7 +17,7 @@ const URI_PATH: &str = "/services/data/v61.0/jobs/query";
 pub enum Error {
     #[error(transparent)]
     SendMessage(#[from] tokio::sync::broadcast::error::SendError<Event>),
-    #[error("missing required attribute")]
+    #[error("missing required attribute: {}", 1)]
     MissingRequiredAttribute(String),
     #[error("no array data available")]
     EmptyArray(),
