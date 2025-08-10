@@ -6,29 +6,46 @@ use std::path::PathBuf;
 /// Processor for creating salesforce account query job.
 /// ```json
 /// {
-///     "salesforce_query": {
+///     "salesforce_bulkapi_job_creator": {
 ///    "label": "salesforce_query_job",
 ///         "credentials": "/etc/sfdc_dev.json",
-///         "operation": "Query",
+///         "operation": "query",
 ///         "job": "Select Id from Account",
-///         "content_type": "Csv",
-///         "column_delimiter": "Comma",
-///         "line_ending": "Crlf"
+///         "content_type": "CSV",
+///         "column_delimiter": "COMMA",
+///         "line_ending": "CRLF"
 ///     }
 ///  }
 /// ```
 /// 
+/// 
+/// /// Processor for creating salesforce account query all job.
+/// ```json
+/// {
+///     "salesforce_bulkapi_job_creator": {
+///    "label": "salesforce_query_all_job",
+///         "credentials": "/etc/sfdc_dev.json",
+///         "operation": "queryAll",
+///         "job": "Select Id from Account",
+///         "content_type": "CSV",
+///         "column_delimiter": "COMMA",
+///         "line_ending": "CRLF"
+///     }
+///  }
+/// ```
+/// 
+/// 
 /// Processor for creating salesforce insert contact job.
 /// ```json
 /// {
-///     "salesforce_query": {
+///     "salesforce_bulkapi_job_creator": {
 ///    "label": "salesforce_insert_job",
 ///         "credentials": "/etc/sfdc_dev.json",
-///         "operation": "Insert",
+///         "operation": "insert",
 ///         "job": "Contact",
-///         "content_type": "Csv",
-///         "column_delimiter": "Comma",
-///         "line_ending": "Crlf"
+///         "content_type": "CSV",
+///         "column_delimiter": "COMMA",
+///         "line_ending": "CRLF"
 ///     }
 ///  }
 /// ```

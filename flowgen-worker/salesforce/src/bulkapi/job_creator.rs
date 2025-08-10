@@ -31,7 +31,7 @@ pub enum Error {
     SalesforceAuth(#[from] crate::client::Error),
     #[error(transparent)]
     Event(#[from] flowgen_core::event::Error),
-    #[error("could not connect to Salesforce")]
+    #[error("missing salesforce access token")]
     NoSalesforceAuthToken(),
 }
 #[derive(Deserialize, Serialize, PartialEq, Clone, Debug, Default)]
