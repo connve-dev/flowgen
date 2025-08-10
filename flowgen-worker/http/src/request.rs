@@ -13,7 +13,7 @@ use tokio::{
 };
 use tracing::{event, Level};
 
-const DEFAULT_MESSAGE_SUBJECT: &'static str = "http.response";
+const DEFAULT_MESSAGE_SUBJECT: &str = "http.response";
 
 #[derive(PartialEq, Clone, Debug, Default, Deserialize, Serialize)]
 struct Credentials {
@@ -152,7 +152,6 @@ impl EventHandler {
         Ok(())
     }
 }
-
 
 #[derive(Debug)]
 pub struct Processor {

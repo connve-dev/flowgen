@@ -8,7 +8,7 @@ use tokio::{
 use tracing::error;
 
 /// Default cache object bucket name.
-const DEFAULT_CACHE_NAME: &'static str = "flowgen_cache";
+const DEFAULT_CACHE_NAME: &str = "flowgen_cache";
 
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
@@ -42,9 +42,9 @@ pub enum Error {
         task_id: usize,
     },
     #[error("flow: {flow}, task_id: {task_id}, source: {source}")]
-    HttpProcessor {
+    HttpRequestProcessor {
         #[source]
-        source: flowgen_http::processor::Error,
+        source: flowgen_http::request::Error,
         flow: String,
         task_id: usize,
     },
@@ -123,29 +123,29 @@ impl Flow<'_> {
         for (i, task) in self.config.flow.tasks.iter().enumerate() {
             match task {
                 // Task::deltalake_writer(config) => {
-                    // todo!();
-                    // let config = Arc::new(config.to_owned());
-                    // let rx = tx.subscribe();
-                    // let cache = Arc::clone(&cache);
-                    // let flow_config = Arc::clone(&self.config);
-                    // let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                    //     flowgen_deltalake::writer::WriterBuilder::new()
-                    //         .config(config)
-                    //         .receiver(rx)
-                    //         .current_task_id(i)
-                    //         .cache(cache)
-                    //         .build()
-                    //         .map_err(|e| Error::DeltalakeWriter {
-                    //             source: e,
-                    //             flow: flow_config.flow.name.to_owned(),
-                    //             task_id: i,
-                    //         })?
-                    //         .run()
-                    //         .await
-                    //         .unwrap();
-                    //     Ok(())
-                    // });
-                    // task_list.push(task);
+                // todo!();
+                // let config = Arc::new(config.to_owned());
+                // let rx = tx.subscribe();
+                // let cache = Arc::clone(&cache);
+                // let flow_config = Arc::clone(&self.config);
+                // let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+                //     flowgen_deltalake::writer::WriterBuilder::new()
+                //         .config(config)
+                //         .receiver(rx)
+                //         .current_task_id(i)
+                //         .cache(cache)
+                //         .build()
+                //         .map_err(|e| Error::DeltalakeWriter {
+                //             source: e,
+                //             flow: flow_config.flow.name.to_owned(),
+                //             task_id: i,
+                //         })?
+                //         .run()
+                //         .await
+                //         .unwrap();
+                //     Ok(())
+                // });
+                // task_list.push(task);
                 // }
                 Task::enumerate(config) => {
                     let config = Arc::new(config.to_owned());
@@ -210,21 +210,21 @@ impl Flow<'_> {
                     let tx = tx.clone();
                     let flow_config = Arc::clone(&self.config);
                     let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_http::processor::ProcessorBuilder::new()
+                        flowgen_http::request::ProcessorBuilder::new()
                             .config(config)
                             .receiver(rx)
                             .sender(tx)
                             .current_task_id(i)
                             .build()
                             .await
-                            .map_err(|e| Error::HttpProcessor {
+                            .map_err(|e| Error::HttpRequestProcessor {
                                 source: e,
                                 flow: flow_config.flow.name.to_owned(),
                                 task_id: i,
                             })?
                             .run()
                             .await
-                            .map_err(|e| Error::HttpProcessor {
+                            .map_err(|e| Error::HttpRequestProcessor {
                                 source: e,
                                 flow: flow_config.flow.name.to_owned(),
                                 task_id: i,
@@ -375,7 +375,7 @@ impl Flow<'_> {
                         Ok(())
                     });
                     task_list.push(task);
-                },
+                }
                 Task::object_store_reader(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
@@ -406,7 +406,7 @@ impl Flow<'_> {
                         Ok(())
                     });
                     task_list.push(task);
-                },
+                }
                 Task::object_store_writer(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
