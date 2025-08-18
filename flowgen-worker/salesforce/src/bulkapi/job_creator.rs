@@ -10,8 +10,8 @@ use std::{path::Path, sync::Arc};
 use tokio::sync::broadcast::{Receiver, Sender};
 use tracing::{event, Level};
 
-const DEFAULT_MESSAGE_SUBJECT: &'static str = "bulkapi";
-const DEFAULT_URI_PATH: &'static str = "/services/data/v61.0/jobs/query";
+const DEFAULT_MESSAGE_SUBJECT: &str = "salesforce.bulkapi.job_creator.out";
+const DEFAULT_URI_PATH: &str = "/services/data/v61.0/jobs/query";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -70,9 +70,9 @@ impl EventHandler {
             .connect()
             .await?;
 
-        let token_result = sfdc_client.token_result.ok_or_else(|| {
-            Error::NoSalesforceAuthToken()
-        })?;
+        let token_result = sfdc_client
+            .token_result
+            .ok_or_else(|| Error::NoSalesforceAuthToken())?;
 
         let payload = match self.config.operation {
             super::config::Operation::Query | super::config::Operation::QueryAll => {

@@ -41,9 +41,30 @@ pub enum Error {
         task_id: usize,
     },
     #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
+    SalesforceBulkApiJobCreator {
+        #[source]
+        source: flowgen_salesforce::bulkapi::job_creator::Error,
+        flow: String,
+        task_id: usize,
+    },
+    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
     HttpRequestProcessor {
         #[source]
         source: flowgen_http::request::Error,
+        flow: String,
+        task_id: usize,
+    },
+    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
+    HttpWebhookProcessor {
+        #[source]
+        source: flowgen_http::webhook::Error,
+        flow: String,
+        task_id: usize,
+    },
+    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
+    HttpServer {
+        #[source]
+        source: flowgen_http::server::Error,
         flow: String,
         task_id: usize,
     },
@@ -99,7 +120,7 @@ impl Flow<'_> {
     pub async fn run(mut self) -> Result<Self, Error> {
         let mut task_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
         let (tx, _): (Sender<Event>, Receiver<Event>) = tokio::sync::broadcast::channel(1000);
-        
+
         // Create shared HTTP server manager for webhook processors
         let http_server_manager = Arc::new(flowgen_http::server::HttpServerManager::new());
 
@@ -270,14 +291,14 @@ impl Flow<'_> {
                             .current_task_id(i)
                             .build()
                             .await
-                            .map_err(|e| Error::BulkapiJobCreatorError {
+                            .map_err(|e| Error::SalesforceBulkApiJobCreator {
                                 source: e,
                                 flow: flow_config.flow.name.to_owned(),
                                 task_id: i,
                             })?
                             .run()
                             .await
-                            .map_err(|e| Error::BulkapiJobCreatorError {
+                            .map_err(|e| Error::SalesforceBulkApiJobCreator {
                                 source: e,
                                 flow: flow_config.flow.name.to_owned(),
                                 task_id: i,
@@ -458,15 +479,18 @@ impl Flow<'_> {
                 }
             }
         }
-        
+
         // Start HTTP server after all webhook processors has been created.
         let http_server_task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-            http_server_manager.start_server().await.map_err(|e| Error::HttpServerManager {
-                source: e,
-                flow: "http_server".to_string(),
-                task_id: 0,
-            })
+            http_server_manager
+                .start_server()
+                .await
+                .map_err(|e| Error::HttpServer {
+                    source: e,
+                    flow: "http_server".to_string(),
+                    task_id: 0,
+                })
         });
         task_list.push(http_server_task);
 
