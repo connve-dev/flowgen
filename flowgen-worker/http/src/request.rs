@@ -48,8 +48,6 @@ pub enum Error {
     ReqwestInvalidHeaderValue(#[from] reqwest::header::InvalidHeaderValue),
     #[error("missing required attribute: {}", _0)]
     MissingRequiredAttribute(String),
-    #[error("provided attribute not found")]
-    NotFound(),
     #[error("either payload json or payload input is required")]
     PayloadConfig(),
 }
