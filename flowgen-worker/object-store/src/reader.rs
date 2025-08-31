@@ -3,7 +3,7 @@ use arrow::csv::reader::Format;
 use bytes::Bytes;
 use flowgen_core::cache::Cache;
 use flowgen_core::event::{generate_subject, Event, EventBuilder, SubjectSuffix};
-use flowgen_core::file::{FileType, FromReader};
+use flowgen_core::buffer::{ContentType, FromReader};
 use flowgen_core::{client::Client, event::EventData};
 use object_store::GetResultPayload;
 use std::io::{BufReader, Seek};
@@ -85,8 +85,8 @@ impl<T: Cache> EventHandler<T> {
 
         match result.payload {
             GetResultPayload::File(mut file, _) => {
-                let file_type = match extension {
-                    DEFAULT_JSON_EXTENSION => FileType::Json,
+                let content_type = match extension {
+                    DEFAULT_JSON_EXTENSION => ContentType::Json,
                     DEFAULT_CSV_EXTENSION => {
                         let batch_size = self.config.batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
                         let has_header = self.config.has_header.unwrap_or(DEFAULT_HAS_HEADER);
@@ -108,12 +108,12 @@ impl<T: Cache> EventHandler<T> {
                             }
                         }
 
-                        FileType::Csv {
+                        ContentType::Csv {
                             batch_size,
                             has_header,
                         }
                     }
-                    DEFAULT_AVRO_EXTENSION => FileType::Avro,
+                    DEFAULT_AVRO_EXTENSION => ContentType::Avro,
                     _ => {
                         event!(Level::WARN, "Unsupported file extension: {}", extension);
                         return Ok(());
@@ -121,7 +121,7 @@ impl<T: Cache> EventHandler<T> {
                 };
 
                 let reader = BufReader::new(file);
-                let event_data_list = EventData::from_reader(reader, file_type)?;
+                let event_data_list = EventData::from_reader(reader, content_type)?;
 
                 for event_data in event_data_list {
                     // Generate event subject.

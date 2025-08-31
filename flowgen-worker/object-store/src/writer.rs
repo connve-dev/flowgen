@@ -1,7 +1,7 @@
 use super::config::{DEFAULT_AVRO_EXTENSION, DEFAULT_CSV_EXTENSION, DEFAULT_JSON_EXTENSION};
-use apache_avro::from_avro_datum;
 use bytes::Bytes;
 use chrono::{DateTime, Datelike, Utc};
+use flowgen_core::buffer::ToWriter;
 use flowgen_core::event::{Event, SubjectSuffix};
 use flowgen_core::{client::Client, event::generate_subject};
 use object_store::PutPayload;
@@ -27,6 +27,8 @@ pub enum Error {
     ObjectStore(#[from] object_store::Error),
     #[error(transparent)]
     ObjectStoreClient(#[from] super::client::Error),
+    #[error(transparent)]
+    Event(#[from] flowgen_core::event::Error),
     #[error("missing required attribute: {}", _0)]
     MissingRequiredAttribute(String),
     #[error("could not initialize object store context")]
@@ -73,40 +75,18 @@ impl EventHandler {
         path.push(&filename);
 
         let mut writer = Vec::new();
-        let object_path = match &event.data {
-            flowgen_core::event::EventData::ArrowRecordBatch(data) => {
-                arrow::csv::WriterBuilder::new()
-                    .with_header(true)
-                    .build(&mut writer)
-                    .write(data)?;
-                object_store::path::Path::from(format!(
-                    "{}.{}",
-                    path.to_string_lossy(),
-                    DEFAULT_CSV_EXTENSION
-                ))
-            }
-            flowgen_core::event::EventData::Avro(data) => {
-                let schema = apache_avro::Schema::parse_str(&data.schema)?;
-                let value = from_avro_datum(&schema, &mut &data.raw_bytes[..], None)?;
-
-                let mut writer = apache_avro::Writer::new(&schema, &mut writer);
-                writer.append(value)?;
-                writer.flush()?;
-                object_store::path::Path::from(format!(
-                    "{}.{}",
-                    path.to_string_lossy(),
-                    DEFAULT_AVRO_EXTENSION
-                ))
-            }
-            flowgen_core::event::EventData::Json(data) => {
-                serde_json::to_writer_pretty(&mut writer, data)?;
-                object_store::path::Path::from(format!(
-                    "{}.{}",
-                    path.to_string_lossy(),
-                    DEFAULT_JSON_EXTENSION
-                ))
-            }
+        let extension = match &event.data {
+            flowgen_core::event::EventData::ArrowRecordBatch(_) => DEFAULT_CSV_EXTENSION,
+            flowgen_core::event::EventData::Avro(_) => DEFAULT_AVRO_EXTENSION,
+            flowgen_core::event::EventData::Json(_) => DEFAULT_JSON_EXTENSION,
         };
+
+        // Transform the event data to writer.
+        event.data.to_writer(&mut writer)?;
+
+        let object_path =
+            object_store::path::Path::from(format!("{}.{}", path.to_string_lossy(), extension));
+
         // Upload processed data to object store.
         let payload = PutPayload::from_bytes(Bytes::from(writer));
         context.object_store.put(&object_path, payload).await?;

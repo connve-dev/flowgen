@@ -1,10 +1,10 @@
-use crate::file::{FileType, FromReader};
+use crate::buffer::{ContentType, FromReader, ToWriter};
 use apache_avro::{from_avro_datum, Reader as AvroReader};
-use arrow::csv::reader::Format;
+use arrow::{array::RecordBatchWriter, csv::reader::Format};
 use chrono::Utc;
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, Write};
 use std::sync::Arc;
 use tracing::{event, Level};
 
@@ -49,6 +49,8 @@ pub enum Error {
     SerdeJson(#[from] serde_json::error::Error),
     #[error("missing required attribute: {}", _0)]
     MissingRequiredAttribute(String),
+    #[error("content type conversion not supported: {from} to {to}")]
+    UnsupportedContentTypeConversion { from: String, to: String },
 }
 
 #[derive(Debug, Clone)]
@@ -171,27 +173,25 @@ impl EventBuilder {
 impl<R: Read + Seek> FromReader<R> for EventData {
     type Error = Error;
 
-    fn from_reader(mut reader: R, file_type: FileType) -> Result<Vec<Self>, Self::Error> {
-        match file_type {
-            FileType::Json => {
+    fn from_reader(mut reader: R, content_type: ContentType) -> Result<Vec<Self>, Self::Error> {
+        match content_type {
+            ContentType::Json => {
                 let data: Value = serde_json::from_reader(reader)?;
                 Ok(vec![EventData::Json(data)])
             }
-            FileType::Csv {
+            ContentType::Csv {
                 batch_size,
                 has_header,
             } => {
                 let (schema, _) = Format::default()
                     .with_header(true)
-                    .infer_schema(&mut reader, Some(100))
-                    .map_err(Error::Arrow)?;
-                reader.rewind().map_err(Error::IO)?;
+                    .infer_schema(&mut reader, Some(100))?;
+                reader.rewind()?;
 
                 let csv = arrow::csv::ReaderBuilder::new(Arc::new(schema))
                     .with_header(has_header)
                     .with_batch_size(batch_size)
-                    .build(reader)
-                    .map_err(Error::Arrow)?;
+                    .build(reader)?;
 
                 let mut events = Vec::new();
                 for batch in csv {
@@ -199,7 +199,7 @@ impl<R: Read + Seek> FromReader<R> for EventData {
                 }
                 Ok(events)
             }
-            FileType::Avro => {
+            ContentType::Avro => {
                 let avro_reader = AvroReader::new(reader)?;
                 let schema = avro_reader.writer_schema().clone();
                 let schema_json = schema.canonical_form();
@@ -216,6 +216,35 @@ impl<R: Read + Seek> FromReader<R> for EventData {
                     events.push(EventData::Avro(avro_data));
                 }
                 Ok(events)
+            }
+        }
+    }
+}
+
+impl<W: Write> ToWriter<W> for EventData {
+    type Error = Error;
+
+    fn to_writer(self, writer: W) -> Result<(), Self::Error> {
+        match self {
+            EventData::Json(data) => {
+                serde_json::to_writer(writer, &data)?;
+                Ok(())
+            }
+            EventData::ArrowRecordBatch(batch) => {
+                let mut csv_writer = arrow::csv::WriterBuilder::new()
+                    .with_header(true) // Assume has header.
+                    .build(writer);
+                csv_writer.write(&batch)?;
+                csv_writer.close()?;
+                Ok(())
+            }
+            EventData::Avro(avro_data) => {
+                let schema = apache_avro::Schema::parse_str(&avro_data.schema)?;
+                let value = from_avro_datum(&schema, &mut &avro_data.raw_bytes[..], None)?;
+                let mut avro_writer = apache_avro::Writer::new(&schema, writer);
+                avro_writer.append(value)?;
+                avro_writer.flush()?;
+                Ok(())
             }
         }
     }
