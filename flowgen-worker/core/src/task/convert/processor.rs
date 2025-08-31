@@ -1,6 +1,5 @@
 use super::super::super::event::{Event, EventBuilder, EventData};
-use crate::event::AvroData;
-use chrono::Utc;
+use crate::event::{generate_subject, AvroData, SubjectSuffix};
 use serde_avro_fast::ser;
 use serde_json::{Map, Value};
 use std::sync::Arc;
@@ -88,11 +87,12 @@ impl EventHandler {
             _ => todo!(),
         };
 
-        let timestamp = Utc::now().timestamp_micros();
-        let subject = match &self.config.label {
-            Some(label) => format!("{}.{}", label.to_lowercase(), timestamp),
-            None => format!("{DEFAULT_MESSAGE_SUBJECT}.{timestamp}"),
-        };
+        // Generate event subject.
+        let subject = generate_subject(
+            self.config.label.as_deref(),
+            DEFAULT_MESSAGE_SUBJECT,
+            SubjectSuffix::Timestamp,
+        );
 
         // Send processor output as event.
         let e = EventBuilder::new()

@@ -1,11 +1,39 @@
+use crate::file::{FileType, FromReader};
 use apache_avro::{from_avro_datum, Reader as AvroReader};
 use arrow::csv::reader::Format;
 use chrono::Utc;
-use crate::file::{FileType, FromReader};
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 use std::io::{Read, Seek};
 use std::sync::Arc;
+
+/// Subject suffix options for event subjects.
+pub enum SubjectSuffix<'a> {
+    /// Use current timestamp as suffix.
+    Timestamp,
+    /// Use custom ID as suffix.
+    Id(&'a str),
+}
+
+/// Generates a subject string using optional label or base subject with suffix.
+///
+/// # Arguments
+/// * `label` - Optional label to use as prefix
+/// * `base_subject` - Base subject to use when label is None
+/// * `suffix` - Suffix type (timestamp or custom ID)
+///
+/// # Returns
+/// Formatted subject string with suffix
+pub fn generate_subject(label: Option<&str>, base_subject: &str, suffix: SubjectSuffix) -> String {
+    let suffix_str = match suffix {
+        SubjectSuffix::Timestamp => Utc::now().timestamp_micros().to_string(),
+        SubjectSuffix::Id(id) => id.to_string(),
+    };
+    match label {
+        Some(label) => format!("{}.{}", label.to_lowercase(), suffix_str),
+        None => format!("{}.{}", base_subject, suffix_str),
+    }
+}
 
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
@@ -141,7 +169,10 @@ impl<R: Read + Seek> FromReader<R> for EventData {
                 let data: Value = serde_json::from_reader(reader)?;
                 Ok(vec![EventData::Json(data)])
             }
-            FileType::Csv { batch_size, has_header } => {
+            FileType::Csv {
+                batch_size,
+                has_header,
+            } => {
                 let (schema, _) = Format::default()
                     .with_header(true)
                     .infer_schema(&mut reader, Some(100))
@@ -169,7 +200,7 @@ impl<R: Read + Seek> FromReader<R> for EventData {
                 for record in avro_reader {
                     let value = record?;
                     let raw_bytes = apache_avro::to_avro_datum(&schema, value)?;
-                    
+
                     let avro_data = AvroData {
                         schema: schema_json.clone(),
                         raw_bytes,

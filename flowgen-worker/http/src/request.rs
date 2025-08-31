@@ -1,7 +1,6 @@
-use chrono::Utc;
 use flowgen_core::{
     config::ConfigExt,
-    event::{Event, EventBuilder, EventData},
+    event::{generate_subject, Event, EventBuilder, EventData, SubjectSuffix},
 };
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
@@ -128,16 +127,12 @@ impl EventHandler {
         // Prepare processor output.
         let data = json!(resp);
 
-        let timestamp = Utc::now().timestamp_micros();
-        let subject = match &self.config.label {
-            Some(label) => format!(
-                "{}.{}.{}",
-                DEFAULT_MESSAGE_SUBJECT,
-                label.to_lowercase(),
-                timestamp
-            ),
-            None => format!("{DEFAULT_MESSAGE_SUBJECT}.{timestamp}"),
-        };
+        // Generate event subject.
+        let subject = generate_subject(
+            self.config.label.as_deref(),
+            DEFAULT_MESSAGE_SUBJECT,
+            SubjectSuffix::Timestamp,
+        );
 
         // Send processor output as event.
         let e = EventBuilder::new()

@@ -1,6 +1,5 @@
 use axum::{body::Body, extract::Request, response::IntoResponse, routing::MethodRouter};
-use chrono::Utc;
-use flowgen_core::event::{Event, EventBuilder, EventData};
+use flowgen_core::event::{generate_subject, Event, EventBuilder, EventData, SubjectSuffix};
 use reqwest::{header::HeaderMap, StatusCode};
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
@@ -82,17 +81,12 @@ impl EventHandler {
             DEFAULT_PAYLOAD_KEY: json_body
         });
 
-        // Create event subject.
-        let timestamp = Utc::now().timestamp_micros();
-        let subject = match &self.config.label {
-            Some(label) => format!(
-                "{}.{}.{}",
-                DEFAULT_MESSAGE_SUBJECT,
-                label.to_lowercase(),
-                timestamp
-            ),
-            None => format!("{DEFAULT_MESSAGE_SUBJECT}.{timestamp}"),
-        };
+        // Generate event subject.
+        let subject = generate_subject(
+            self.config.label.as_deref(),
+            DEFAULT_MESSAGE_SUBJECT,
+            SubjectSuffix::Timestamp,
+        );
 
         // Send processor output as event.
         let e = EventBuilder::new()

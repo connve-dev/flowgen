@@ -1,5 +1,4 @@
-use crate::event::{Event, EventBuilder, EventData};
-use chrono::Utc;
+use crate::event::{generate_subject, Event, EventBuilder, EventData, SubjectSuffix};
 use serde_json::json;
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::broadcast::Sender, time};
@@ -26,16 +25,16 @@ pub struct Subscriber {
 impl crate::task::runner::Runner for Subscriber {
     type Error = Error;
     async fn run(self) -> Result<(), Error> {
+        // Generate event subject.
+        let subject = generate_subject(
+            self.config.label.as_deref(),
+            DEFAULT_MESSAGE_SUBJECT,
+            SubjectSuffix::Timestamp,
+        );
         let mut counter = 0;
         loop {
             time::sleep(Duration::from_secs(self.config.interval)).await;
             counter += 1;
-
-            let timestamp = Utc::now().timestamp_micros();
-            let subject = match &self.config.label {
-                Some(label) => format!("{}.{}", label.to_lowercase(), timestamp),
-                None => format!("{DEFAULT_MESSAGE_SUBJECT}.{timestamp}"),
-            };
 
             let data = match &self.config.message {
                 Some(message) => json!(message),
@@ -46,10 +45,9 @@ impl crate::task::runner::Runner for Subscriber {
                 .data(EventData::Json(data))
                 .subject(subject.clone())
                 .current_task_id(self.current_task_id)
-                .build()
-                .map_err(Error::Event)?;
+                .build()?;
 
-            self.tx.send(e).map_err(Error::SendMessage)?;
+            self.tx.send(e)?;
             event!(Level::INFO, "Event processed: {}", subject);
 
             match self.config.count {

@@ -1,9 +1,8 @@
 use super::config::{DEFAULT_AVRO_EXTENSION, DEFAULT_CSV_EXTENSION, DEFAULT_JSON_EXTENSION};
 use arrow::csv::reader::Format;
 use bytes::Bytes;
-use chrono::Utc;
 use flowgen_core::cache::Cache;
-use flowgen_core::event::{Event, EventBuilder};
+use flowgen_core::event::{generate_subject, Event, EventBuilder, SubjectSuffix};
 use flowgen_core::file::{FileType, FromReader};
 use flowgen_core::{client::Client, event::EventData};
 use object_store::GetResultPayload;
@@ -84,11 +83,12 @@ impl<T: Cache> EventHandler<T> {
             .extension()
             .ok_or_else(Error::NoFileExtension)?;
 
-        let timestamp = Utc::now().timestamp_micros();
-        let subject = match &self.config.label {
-            Some(label) => format!("{}.{}", label.to_lowercase(), timestamp),
-            None => format!("{DEFAULT_MESSAGE_SUBJECT}.{timestamp}"),
-        };
+        // Generate event subject.
+        let subject = generate_subject(
+            self.config.label.as_deref(),
+            DEFAULT_MESSAGE_SUBJECT,
+            SubjectSuffix::Timestamp,
+        );
 
         match result.payload {
             GetResultPayload::File(mut file, _) => {
@@ -131,11 +131,13 @@ impl<T: Cache> EventHandler<T> {
                 let event_data_list = EventData::from_reader(reader, file_type)?;
 
                 for event_data in event_data_list {
+                    // Prepare and send event.
                     let e = EventBuilder::new()
                         .subject(subject.clone())
                         .data(event_data)
                         .current_task_id(self.current_task_id)
                         .build()?;
+
                     self.tx.send(e)?;
                     event!(Level::INFO, "Event processed: {}", subject);
                 }

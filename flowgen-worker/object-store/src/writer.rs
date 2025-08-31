@@ -2,8 +2,8 @@ use super::config::{DEFAULT_AVRO_EXTENSION, DEFAULT_CSV_EXTENSION, DEFAULT_JSON_
 use apache_avro::from_avro_datum;
 use bytes::Bytes;
 use chrono::{DateTime, Datelike, Utc};
-use flowgen_core::client::Client;
-use flowgen_core::event::Event;
+use flowgen_core::event::{Event, SubjectSuffix};
+use flowgen_core::{client::Client, event::generate_subject};
 use object_store::PutPayload;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast::Receiver, Mutex};
@@ -111,7 +111,12 @@ impl EventHandler {
         let payload = PutPayload::from_bytes(Bytes::from(writer));
         context.object_store.put(&object_path, payload).await?;
 
-        let subject = format!("{DEFAULT_MESSAGE_SUBJECT}.{filename}");
+        let base_subject = format!("{DEFAULT_MESSAGE_SUBJECT}.{filename}");
+        let subject = generate_subject(
+            self.config.label.as_deref(),
+            &base_subject,
+            SubjectSuffix::Timestamp,
+        );
         event!(Level::INFO, "Event processed: {}", subject);
         Ok(())
     }

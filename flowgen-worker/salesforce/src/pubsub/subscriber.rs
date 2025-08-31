@@ -1,7 +1,7 @@
 use flowgen_core::{
     cache::Cache,
     client::Client,
-    event::{AvroData, Event, EventBuilder, EventData},
+    event::{generate_subject, AvroData, Event, EventBuilder, EventData, SubjectSuffix},
 };
 use salesforce_pubsub::eventbus::v1::{FetchRequest, SchemaRequest, TopicRequest};
 use std::sync::Arc;
@@ -162,24 +162,31 @@ impl<T: Cache> EventHandler<T> {
                             // Normalize topic name.
                             let topic = topic_name.replace('/', ".").to_lowercase();
 
-                            // Generate event subject.
-                            let subject = if let Some(stripped) = topic.strip_prefix('.') {
-                                format!("{}.{}.{}", DEFAULT_MESSAGE_SUBJECT, stripped, event.id)
+                            // Generate base subject.
+                            let base_subject = if let Some(stripped) = topic.strip_prefix('.') {
+                                format!("{DEFAULT_MESSAGE_SUBJECT}.{stripped}")
                             } else {
-                                format!("{}.{}.{}", DEFAULT_MESSAGE_SUBJECT, topic, event.id)
+                                format!("{DEFAULT_MESSAGE_SUBJECT}.{topic}")
                             };
+
+                            // Generate event subject.
+                            let subject = generate_subject(
+                                self.config.label.as_deref(),
+                                &base_subject,
+                                SubjectSuffix::Id(&event.id),
+                            );
 
                             // Build and send event.
                             let e = EventBuilder::new()
                                 .data(EventData::Avro(data))
-                                .subject(subject)
+                                .subject(subject.clone())
                                 .id(event.id)
                                 .current_task_id(self.current_task_id)
                                 .build()
                                 .map_err(Error::Event)?;
 
-                            event!(Level::INFO, "Event processed: {}", e.subject);
-                            self.tx.send(e).map_err(Error::SendMessage)?;
+                            self.tx.send(e)?;
+                            event!(Level::INFO, "Event processed: {}", subject);
                         }
                     }
                 }
