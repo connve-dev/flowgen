@@ -13,10 +13,8 @@ use tracing::Level;
 /// creates the application instance, and runs it. Exits with code 1 on any error.
 #[tokio::main]
 async fn main() {
-    // Initialize tracing for logging
     tracing_subscriber::fmt::init();
 
-    // Get configuration file path from environment variable.
     let config_path = match env::var("CONFIG_PATH") {
         Ok(path) => path,
         Err(e) => {
@@ -29,7 +27,6 @@ async fn main() {
         }
     };
 
-    // Build configuration from file and environment variables.
     let config = match Config::builder()
         .add_source(config::File::with_name(&config_path))
         .add_source(config::Environment::with_prefix("APP"))
@@ -42,7 +39,6 @@ async fn main() {
         }
     };
 
-    // Deserialize configuration into AppConfig struct.
     let app_config = match config.try_deserialize::<AppConfig>() {
         Ok(config) => config,
         Err(e) => {
@@ -50,8 +46,6 @@ async fn main() {
             process::exit(1);
         }
     };
-
-    // Create and run the application.
     let app = App { config: app_config };
     if let Err(e) = app.run().await {
         event!(Level::ERROR, "application failed to run: {}", e);
