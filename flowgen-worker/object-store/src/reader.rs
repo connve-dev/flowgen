@@ -2,7 +2,9 @@ use super::config::{DEFAULT_AVRO_EXTENSION, DEFAULT_CSV_EXTENSION, DEFAULT_JSON_
 use bytes::Bytes;
 use flowgen_core::buffer::{ContentType, FromReader};
 use flowgen_core::cache::Cache;
-use flowgen_core::event::{generate_subject, Event, EventBuilder, SubjectSuffix, DEFAULT_LOG_MESSAGE};
+use flowgen_core::event::{
+    generate_subject, Event, EventBuilder, SubjectSuffix, DEFAULT_LOG_MESSAGE,
+};
 use flowgen_core::{client::Client, event::EventData};
 use object_store::GetResultPayload;
 use std::io::BufReader;
@@ -147,6 +149,7 @@ impl<T: Cache> EventHandler<T> {
 }
 
 /// Object store reader that processes events from a broadcast receiver.
+#[derive(Debug)]
 pub struct Reader<T: Cache> {
     /// Reader configuration settings.
     config: Arc<super::config::Reader>,
@@ -274,5 +277,278 @@ where
                 .ok_or_else(|| Error::MissingRequiredAttribute("cache".to_string()))?,
             current_task_id: self.current_task_id,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flowgen_core::cache::Cache;
+    use std::path::PathBuf;
+    use tokio::sync::broadcast;
+
+    // Simple mock cache implementation for tests
+    #[derive(Debug, Default)]
+    struct TestCache {}
+
+    impl TestCache {
+        fn new() -> Self {
+            Self {}
+        }
+    }
+
+    impl Cache for TestCache {
+        type Error = String;
+
+        async fn init(self, _bucket: &str) -> Result<Self, Self::Error> {
+            Ok(self)
+        }
+
+        async fn put(&self, _key: &str, _value: bytes::Bytes) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        async fn get(&self, _key: &str) -> Result<bytes::Bytes, Self::Error> {
+            Ok(bytes::Bytes::new())
+        }
+    }
+
+    #[test]
+    fn test_reader_builder_new() {
+        let builder: ReaderBuilder<TestCache> = ReaderBuilder::new();
+        assert!(builder.config.is_none());
+        assert!(builder.rx.is_none());
+        assert!(builder.tx.is_none());
+        assert!(builder.cache.is_none());
+        assert_eq!(builder.current_task_id, 0);
+    }
+
+    #[test]
+    fn test_reader_builder_config() {
+        let config = Arc::new(crate::config::Reader {
+            label: Some("test_reader".to_string()),
+            path: PathBuf::from("s3://bucket/input/"),
+            credentials: None,
+            client_options: None,
+            batch_size: Some(500),
+            has_header: Some(true),
+            cache_options: None,
+        });
+
+        let builder: ReaderBuilder<TestCache> = ReaderBuilder::new().config(config.clone());
+        assert!(builder.config.is_some());
+        assert_eq!(
+            builder.config.unwrap().path,
+            PathBuf::from("s3://bucket/input/")
+        );
+    }
+
+    #[test]
+    fn test_reader_builder_receiver() {
+        let (_, rx) = broadcast::channel::<Event>(10);
+        let builder: ReaderBuilder<TestCache> = ReaderBuilder::new().receiver(rx);
+        assert!(builder.rx.is_some());
+    }
+
+    #[test]
+    fn test_reader_builder_sender() {
+        let (tx, _) = broadcast::channel::<Event>(10);
+        let builder: ReaderBuilder<TestCache> = ReaderBuilder::new().sender(tx);
+        assert!(builder.tx.is_some());
+    }
+
+    #[test]
+    fn test_reader_builder_cache() {
+        let cache = std::sync::Arc::new(TestCache::new());
+        let builder = ReaderBuilder::new().cache(cache);
+        assert!(builder.cache.is_some());
+    }
+
+    #[test]
+    fn test_reader_builder_current_task_id() {
+        let builder: ReaderBuilder<TestCache> = ReaderBuilder::new().current_task_id(123);
+        assert_eq!(builder.current_task_id, 123);
+    }
+
+    #[tokio::test]
+    async fn test_reader_builder_missing_config() {
+        let (tx, rx) = broadcast::channel::<Event>(10);
+        let cache = std::sync::Arc::new(TestCache::new());
+
+        let result = ReaderBuilder::<TestCache>::new()
+            .receiver(rx)
+            .sender(tx)
+            .cache(cache)
+            .current_task_id(1)
+            .build()
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "config")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reader_builder_missing_receiver() {
+        let config = Arc::new(crate::config::Reader {
+            label: Some("test".to_string()),
+            path: PathBuf::from("/tmp/input/"),
+            credentials: None,
+            client_options: None,
+            batch_size: None,
+            has_header: None,
+            cache_options: None,
+        });
+
+        let (tx, _) = broadcast::channel::<Event>(10);
+        let cache = std::sync::Arc::new(TestCache::new());
+
+        let result = ReaderBuilder::<TestCache>::new()
+            .config(config)
+            .sender(tx)
+            .cache(cache)
+            .current_task_id(1)
+            .build()
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "receiver")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reader_builder_missing_sender() {
+        let config = Arc::new(crate::config::Reader {
+            label: Some("test".to_string()),
+            path: PathBuf::from("gs://bucket/data/"),
+            credentials: Some(PathBuf::from("/creds.json")),
+            client_options: None,
+            batch_size: Some(1000),
+            has_header: Some(false),
+            cache_options: None,
+        });
+
+        let (_, rx) = broadcast::channel::<Event>(10);
+        let cache = std::sync::Arc::new(TestCache::new());
+
+        let result = ReaderBuilder::<TestCache>::new()
+            .config(config)
+            .receiver(rx)
+            .cache(cache)
+            .current_task_id(1)
+            .build()
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "sender")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reader_builder_missing_cache() {
+        let config = Arc::new(crate::config::Reader {
+            label: Some("test".to_string()),
+            path: PathBuf::from("file:///local/files/"),
+            credentials: None,
+            client_options: None,
+            batch_size: Some(250),
+            has_header: Some(true),
+            cache_options: None,
+        });
+
+        let (tx, rx) = broadcast::channel::<Event>(10);
+
+        let result = ReaderBuilder::<TestCache>::new()
+            .config(config)
+            .receiver(rx)
+            .sender(tx)
+            .current_task_id(1)
+            .build()
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "cache")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reader_builder_build_success() {
+        let config = Arc::new(crate::config::Reader {
+            label: Some("complete_reader".to_string()),
+            path: PathBuf::from("s3://my-bucket/files/"),
+            credentials: Some(PathBuf::from("/aws-creds.json")),
+            client_options: Some({
+                let mut opts = std::collections::HashMap::new();
+                opts.insert("region".to_string(), "us-west-2".to_string());
+                opts
+            }),
+            batch_size: Some(2000),
+            has_header: Some(true),
+            cache_options: None,
+        });
+
+        let (tx, rx) = broadcast::channel::<Event>(50);
+        let cache = std::sync::Arc::new(TestCache::new());
+
+        let result = ReaderBuilder::<TestCache>::new()
+            .config(config.clone())
+            .receiver(rx)
+            .sender(tx)
+            .cache(cache)
+            .current_task_id(777)
+            .build()
+            .await;
+
+        assert!(result.is_ok());
+        let reader = result.unwrap();
+        assert_eq!(reader.current_task_id, 777);
+        assert_eq!(reader.config.path, PathBuf::from("s3://my-bucket/files/"));
+    }
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::MissingRequiredAttribute("test_field".to_string());
+        assert!(err
+            .to_string()
+            .contains("missing required attribute: test_field"));
+    }
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(DEFAULT_MESSAGE_SUBJECT, "object_store.reader.in");
+        assert_eq!(DEFAULT_BATCH_SIZE, 1000);
+    }
+
+    #[test]
+    fn test_reader_builder_chain() {
+        let config = Arc::new(crate::config::Reader {
+            label: Some("chain_test".to_string()),
+            path: PathBuf::from("file:///data/input/"),
+            credentials: None,
+            client_options: None,
+            batch_size: Some(100),
+            has_header: Some(false),
+            cache_options: None,
+        });
+
+        let (tx, rx) = broadcast::channel::<Event>(5);
+        let cache = std::sync::Arc::new(TestCache::new());
+
+        let builder = ReaderBuilder::<TestCache>::new()
+            .config(config.clone())
+            .receiver(rx)
+            .sender(tx)
+            .cache(cache)
+            .current_task_id(20);
+
+        assert!(builder.config.is_some());
+        assert!(builder.rx.is_some());
+        assert!(builder.tx.is_some());
+        assert!(builder.cache.is_some());
+        assert_eq!(builder.current_task_id, 20);
     }
 }

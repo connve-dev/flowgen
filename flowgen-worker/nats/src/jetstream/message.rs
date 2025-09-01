@@ -92,3 +92,179 @@ impl NatsMessageExt for async_nats::Message {
         event.data(event_data).build().map_err(Error::Event)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_nats::HeaderMap;
+    use flowgen_core::event::{EventBuilder, EventData};
+    use serde_json::json;
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::NoRecordBatch();
+        assert!(err.to_string().contains("error getting recordbatch"));
+    }
+
+    #[test]
+    fn test_flowgen_message_ext_json() {
+        let json_data = json!({
+            "test": "value",
+            "number": 42
+        });
+        
+        let event = EventBuilder::new()
+            .subject("test.subject".to_string())
+            .id("test-id-123".to_string())
+            .data(EventData::Json(json_data))
+            .build()
+            .unwrap();
+
+        let result = event.to_publish();
+        assert!(result.is_ok());
+        
+        // We can't easily verify the contents without accessing private fields,
+        // but we can verify the conversion succeeds
+    }
+
+    #[test]
+    fn test_flowgen_message_ext_avro() {
+        let avro_data = AvroData {
+            schema: "test_schema".to_string(),
+            raw_bytes: vec![1, 2, 3, 4],
+        };
+        
+        let event = EventBuilder::new()
+            .subject("avro.test".to_string())
+            .data(EventData::Avro(avro_data))
+            .build()
+            .unwrap();
+
+        let result = event.to_publish();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_flowgen_message_ext_no_id() {
+        let json_data = json!({"test": "no_id"});
+        
+        let event = EventBuilder::new()
+            .subject("test.no.id".to_string())
+            .data(EventData::Json(json_data))
+            .build()
+            .unwrap();
+
+        let result = event.to_publish();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_nats_message_ext_json() {
+        let json_payload = serde_json::to_vec(&json!({"message": "test"})).unwrap();
+        
+        // Create a mock NATS message
+        let message = async_nats::Message {
+            subject: "test.subject".into(),
+            payload: json_payload.into(),
+            reply: None,
+            headers: None,
+            status: None,
+            description: None,
+            length: 0,
+        };
+
+        let result = message.to_event();
+        assert!(result.is_ok());
+        
+        let event = result.unwrap();
+        assert_eq!(event.subject, "test.subject");
+        assert!(event.id.is_none()); // No headers provided
+        
+        // Verify the data is JSON type
+        assert!(matches!(event.data, EventData::Json(_)));
+    }
+
+    #[test]
+    fn test_nats_message_ext_with_headers() {
+        let json_payload = serde_json::to_vec(&json!({"with": "headers"})).unwrap();
+        
+        let mut headers = HeaderMap::new();
+        headers.insert(async_nats::header::NATS_MESSAGE_ID, "msg-123");
+        
+        let message = async_nats::Message {
+            subject: "test.headers".into(),
+            payload: json_payload.into(),
+            reply: None,
+            headers: Some(headers),
+            status: None,
+            description: None,
+            length: 0,
+        };
+
+        let result = message.to_event();
+        assert!(result.is_ok());
+        
+        let event = result.unwrap();
+        assert_eq!(event.subject, "test.headers");
+        assert_eq!(event.id, Some("msg-123".to_string()));
+    }
+
+    #[test]
+    fn test_nats_message_ext_avro() {
+        let avro_data = AvroData {
+            schema: "test_avro_schema".to_string(),
+            raw_bytes: vec![5, 6, 7, 8],
+        };
+        
+        let serialized = serialize(&avro_data).unwrap();
+        
+        let message = async_nats::Message {
+            subject: "avro.test".into(),
+            payload: serialized.into(),
+            reply: None,
+            headers: None,
+            status: None,
+            description: None,
+            length: 0,
+        };
+
+        let result = message.to_event();
+        assert!(result.is_ok());
+        
+        let event = result.unwrap();
+        assert_eq!(event.subject, "avro.test");
+        assert!(matches!(event.data, EventData::Avro(_)));
+    }
+
+    #[test]
+    fn test_traits_exist() {
+        // Verify that our traits are properly defined
+        fn accepts_flowgen_message_ext<T: FlowgenMessageExt>(_: T) {}
+        fn accepts_nats_message_ext<T: NatsMessageExt>(_: T) {}
+
+        let json_data = json!({"trait": "test"});
+        let event = EventBuilder::new()
+            .subject("trait.test".to_string())
+            .data(EventData::Json(json_data))
+            .build()
+            .unwrap();
+        
+        accepts_flowgen_message_ext(event);
+
+        let message = async_nats::Message {
+            subject: "test".into(),
+            payload: vec![].into(),
+            reply: None,
+            headers: None,
+            status: None,
+            description: None,
+            length: 0,
+        };
+
+        accepts_nats_message_ext(message);
+    }
+
+    // Note: Arrow RecordBatch tests would require more complex setup
+    // with actual Arrow schemas and data, but the basic trait functionality
+    // is covered by the tests above
+}

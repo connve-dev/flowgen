@@ -45,6 +45,7 @@ impl EventHandler {
     }
 }
 
+#[derive(Debug)]
 pub struct Publisher {
     config: Arc<super::config::Publisher>,
     rx: Receiver<Event>,
@@ -154,4 +155,144 @@ impl PublisherBuilder {
             current_task_id: self.current_task_id,
         })
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tokio::sync::broadcast;
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::MissingRequiredAttribute("test_field".to_string());
+        assert!(err.to_string().contains("missing required event attribute: test_field"));
+
+        let err = Error::MissingNatsClient();
+        assert!(err.to_string().contains("Nats client is missing / not initialized properly"));
+    }
+
+    #[test]
+    fn test_publisher_builder_new() {
+        let builder = PublisherBuilder::new();
+        assert!(builder.config.is_none());
+        assert!(builder.rx.is_none());
+        assert_eq!(builder.current_task_id, 0);
+    }
+
+    #[test]
+    fn test_publisher_builder_default() {
+        let builder = PublisherBuilder::default();
+        assert!(builder.config.is_none());
+        assert!(builder.rx.is_none());
+        assert_eq!(builder.current_task_id, 0);
+    }
+
+    #[test]
+    fn test_publisher_builder_config() {
+        let config = Arc::new(super::super::config::Publisher {
+            credentials: PathBuf::from("/test/creds.jwt"),
+            stream: "test_stream".to_string(),
+            stream_description: Some("Test stream".to_string()),
+            subjects: vec!["test.subject".to_string()],
+            max_age: Some(3600),
+        });
+
+        let builder = PublisherBuilder::new().config(config.clone());
+        assert_eq!(builder.config, Some(config));
+    }
+
+    #[test]
+    fn test_publisher_builder_receiver() {
+        let (_tx, rx) = broadcast::channel(100);
+        let builder = PublisherBuilder::new().receiver(rx);
+        assert!(builder.rx.is_some());
+    }
+
+    #[test]
+    fn test_publisher_builder_current_task_id() {
+        let builder = PublisherBuilder::new().current_task_id(42);
+        assert_eq!(builder.current_task_id, 42);
+    }
+
+    #[tokio::test]
+    async fn test_publisher_builder_build_missing_config() {
+        let (_tx, rx) = broadcast::channel(100);
+        let result = PublisherBuilder::new()
+            .receiver(rx)
+            .current_task_id(1)
+            .build()
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "config"));
+    }
+
+    #[tokio::test]
+    async fn test_publisher_builder_build_missing_receiver() {
+        let config = Arc::new(super::super::config::Publisher {
+            credentials: PathBuf::from("/test/creds.jwt"),
+            stream: "test_stream".to_string(),
+            stream_description: None,
+            subjects: vec!["test.subject".to_string()],
+            max_age: None,
+        });
+
+        let result = PublisherBuilder::new()
+            .config(config)
+            .current_task_id(1)
+            .build()
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "receiver"));
+    }
+
+    #[tokio::test]
+    async fn test_publisher_builder_build_success() {
+        let config = Arc::new(super::super::config::Publisher {
+            credentials: PathBuf::from("/test/creds.jwt"),
+            stream: "test_stream".to_string(),
+            stream_description: Some("Test description".to_string()),
+            subjects: vec!["test.subject.1".to_string(), "test.subject.2".to_string()],
+            max_age: Some(86400),
+        });
+        let (_tx, rx) = broadcast::channel(100);
+
+        let result = PublisherBuilder::new()
+            .config(config.clone())
+            .receiver(rx)
+            .current_task_id(5)
+            .build()
+            .await;
+
+        assert!(result.is_ok());
+        let publisher = result.unwrap();
+        assert_eq!(publisher.config, config);
+        assert_eq!(publisher.current_task_id, 5);
+    }
+
+    #[tokio::test]
+    async fn test_publisher_builder_chain() {
+        let config = Arc::new(super::super::config::Publisher {
+            credentials: PathBuf::from("/chain/test.creds"),
+            stream: "chain_stream".to_string(),
+            stream_description: None,
+            subjects: vec!["chain.subject".to_string()],
+            max_age: Some(1800),
+        });
+        let (_tx, rx) = broadcast::channel(50);
+
+        let publisher = PublisherBuilder::new()
+            .config(config.clone())
+            .receiver(rx)
+            .current_task_id(10)
+            .build()
+            .await
+            .unwrap();
+
+        assert_eq!(publisher.config, config);
+        assert_eq!(publisher.current_task_id, 10);
+    }
+
 }

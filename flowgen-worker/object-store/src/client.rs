@@ -15,6 +15,7 @@ pub enum Error {
 }
 
 /// Object store context containing the store instance and base path.
+#[derive(Debug)]
 pub struct Context {
     /// Object store implementation (S3, GCS, local filesystem, etc.).
     pub object_store: Box<dyn ObjectStore>,
@@ -23,6 +24,7 @@ pub struct Context {
 }
 
 /// Object store client with connection details.
+#[derive(Debug)]
 pub struct Client {
     /// Object store URL path.
     path: PathBuf,
@@ -107,5 +109,124 @@ impl ClientBuilder {
             options: self.options,
             context: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_client_builder_new() {
+        let builder = ClientBuilder::new();
+        assert!(builder.path.is_none());
+        assert!(builder.credentials.is_none());
+        assert!(builder.options.is_none());
+    }
+
+    #[test]
+    fn test_client_builder_path() {
+        let path = PathBuf::from("s3://test-bucket/data/");
+        let builder = ClientBuilder::new().path(path.clone());
+        assert_eq!(builder.path, Some(path));
+    }
+
+    #[test]
+    fn test_client_builder_credentials() {
+        let credentials = PathBuf::from("/path/to/credentials.json");
+        let builder = ClientBuilder::new().credentials(credentials.clone());
+        assert_eq!(builder.credentials, Some(credentials));
+    }
+
+    #[test]
+    fn test_client_builder_options() {
+        let mut options = HashMap::new();
+        options.insert("region".to_string(), "us-east-1".to_string());
+        options.insert("endpoint".to_string(), "https://s3.amazonaws.com".to_string());
+        
+        let builder = ClientBuilder::new().options(options.clone());
+        assert_eq!(builder.options, Some(options));
+    }
+
+    #[test]
+    fn test_client_builder_build_missing_path() {
+        let result = ClientBuilder::new().build();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "path"));
+    }
+
+    #[test]
+    fn test_client_builder_build_success() {
+        let path = PathBuf::from("file:///tmp/test/");
+        let credentials = PathBuf::from("/service-account.json");
+        let mut options = HashMap::new();
+        options.insert("project_id".to_string(), "my-project".to_string());
+
+        let client = ClientBuilder::new()
+            .path(path.clone())
+            .credentials(credentials.clone())
+            .options(options.clone())
+            .build()
+            .unwrap();
+
+        assert_eq!(client.path, path);
+        assert_eq!(client.credentials, Some(credentials));
+        assert_eq!(client.options, Some(options));
+        assert!(client.context.is_none());
+    }
+
+    #[test]
+    fn test_client_builder_chain() {
+        let path = PathBuf::from("gs://bucket/path/");
+        let credentials = PathBuf::from("/creds.json");
+        let mut options = HashMap::new();
+        options.insert("timeout".to_string(), "30".to_string());
+
+        let client = ClientBuilder::new()
+            .path(path.clone())
+            .credentials(credentials.clone())
+            .options(options.clone())
+            .build()
+            .unwrap();
+
+        assert_eq!(client.path, path);
+        assert_eq!(client.credentials, Some(credentials));
+        assert_eq!(client.options, Some(options));
+    }
+
+    #[test]
+    fn test_client_builder_minimal() {
+        let path = PathBuf::from("file:///data/");
+        let client = ClientBuilder::new()
+            .path(path.clone())
+            .build()
+            .unwrap();
+
+        assert_eq!(client.path, path);
+        assert!(client.credentials.is_none());
+        assert!(client.options.is_none());
+        assert!(client.context.is_none());
+    }
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::MissingRequiredAttribute("test_field".to_string());
+        assert!(err.to_string().contains("missing required attribute"));
+
+        let err = Error::EmptyPath();
+        assert!(err.to_string().contains("no path provided"));
+    }
+
+    #[test]  
+    fn test_client_context_structure() {
+        // Test that Context has the expected fields
+        // We can't easily test the actual connection without real object stores,
+        // but we can verify the structure exists
+        let path = PathBuf::from("file:///tmp/");
+        let client = ClientBuilder::new().path(path).build().unwrap();
+        
+        // Context should be None before connecting
+        assert!(client.context.is_none());
     }
 }

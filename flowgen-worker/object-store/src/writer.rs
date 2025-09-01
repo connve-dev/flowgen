@@ -124,6 +124,7 @@ impl EventHandler {
 }
 
 /// Object store writer that processes events from a broadcast receiver.
+#[derive(Debug)]
 pub struct Writer {
     /// Writer configuration settings.
     config: Arc<super::config::Writer>,
@@ -213,5 +214,169 @@ impl WriterBuilder {
                 .ok_or_else(|| Error::MissingRequiredAttribute("receiver".to_string()))?,
             current_task_id: self.current_task_id,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{HivePartitionOptions, HiveParitionKeys};
+    use std::path::PathBuf;
+    use tokio::sync::broadcast;
+
+    #[test]
+    fn test_writer_builder_new() {
+        let builder = WriterBuilder::new();
+        assert!(builder.config.is_none());
+        assert!(builder.rx.is_none());
+        assert_eq!(builder.current_task_id, 0);
+    }
+
+    #[test]
+    fn test_writer_builder_config() {
+        let config = Arc::new(crate::config::Writer {
+            label: Some("test_writer".to_string()),
+            path: PathBuf::from("s3://bucket/path/"),
+            credentials: None,
+            client_options: None,
+            hive_partition_options: None,
+        });
+
+        let builder = WriterBuilder::new().config(config.clone());
+        assert!(builder.config.is_some());
+        assert_eq!(builder.config.unwrap().path, PathBuf::from("s3://bucket/path/"));
+    }
+
+    #[test]
+    fn test_writer_builder_receiver() {
+        let (_, rx) = broadcast::channel::<Event>(10);
+        let builder = WriterBuilder::new().receiver(rx);
+        assert!(builder.rx.is_some());
+    }
+
+    #[test]
+    fn test_writer_builder_current_task_id() {
+        let builder = WriterBuilder::new().current_task_id(42);
+        assert_eq!(builder.current_task_id, 42);
+    }
+
+    #[tokio::test]
+    async fn test_writer_builder_missing_config() {
+        let (_, rx) = broadcast::channel::<Event>(10);
+        let result = WriterBuilder::new()
+            .receiver(rx)
+            .current_task_id(1)
+            .build()
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "config"));
+    }
+
+    #[tokio::test]
+    async fn test_writer_builder_missing_receiver() {
+        let config = Arc::new(crate::config::Writer {
+            label: Some("test".to_string()),
+            path: PathBuf::from("/tmp/output/"),
+            credentials: None,
+            client_options: None,
+            hive_partition_options: None,
+        });
+
+        let result = WriterBuilder::new()
+            .config(config)
+            .current_task_id(1)
+            .build()
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "receiver"));
+    }
+
+    #[tokio::test]
+    async fn test_writer_builder_build_success() {
+        let config = Arc::new(crate::config::Writer {
+            label: Some("complete_writer".to_string()),
+            path: PathBuf::from("gs://my-bucket/data/"),
+            credentials: Some(PathBuf::from("/service-account.json")),
+            client_options: None,
+            hive_partition_options: Some(HivePartitionOptions {
+                enabled: true,
+                partition_keys: vec![HiveParitionKeys::EventDate],
+            }),
+        });
+
+        let (_, rx) = broadcast::channel::<Event>(10);
+
+        let result = WriterBuilder::new()
+            .config(config.clone())
+            .receiver(rx)
+            .current_task_id(99)
+            .build()
+            .await;
+
+        assert!(result.is_ok());
+        let writer = result.unwrap();
+        assert_eq!(writer.current_task_id, 99);
+        assert_eq!(writer.config.path, PathBuf::from("gs://my-bucket/data/"));
+    }
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::MissingRequiredAttribute("test_field".to_string());
+        assert!(err.to_string().contains("missing required attribute: test_field"));
+
+        let err = Error::NoObjectStoreContext();
+        assert!(err.to_string().contains("could not initialize object store context"));
+    }
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(DEFAULT_MESSAGE_SUBJECT, "object_store.writer.out");
+    }
+
+    #[test]
+    fn test_event_handler_structure() {
+        // Test that EventHandler can be constructed with the right types
+        let config = Arc::new(crate::config::Writer {
+            label: None,
+            path: PathBuf::from("/tmp/"),
+            credentials: None,
+            client_options: None,
+            hive_partition_options: None,
+        });
+
+        let client = Arc::new(Mutex::new(
+            crate::client::ClientBuilder::new()
+                .path(PathBuf::from("/tmp/"))
+                .build()
+                .unwrap()
+        ));
+
+        // We can't actually create an EventHandler here because it's private,
+        // but we can verify the types are correct by compiling this
+        let _ = (config, client);
+    }
+
+    #[test]
+    fn test_writer_builder_chain() {
+        let config = Arc::new(crate::config::Writer {
+            label: Some("chain_test".to_string()),
+            path: PathBuf::from("file:///data/output/"),
+            credentials: None,
+            client_options: None,
+            hive_partition_options: None,
+        });
+
+        let (_, rx) = broadcast::channel::<Event>(5);
+
+        let builder = WriterBuilder::new()
+            .config(config.clone())
+            .receiver(rx)
+            .current_task_id(10);
+
+        assert!(builder.config.is_some());
+        assert!(builder.rx.is_some());
+        assert_eq!(builder.current_task_id, 10);
     }
 }

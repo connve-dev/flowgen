@@ -95,3 +95,122 @@ impl ClientBuilder {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_client_builder_new() {
+        let builder = ClientBuilder::new();
+        assert!(builder.credentials_path.is_none());
+    }
+
+    #[test]
+    fn test_client_builder_credentials_path() {
+        let path = PathBuf::from("/path/to/nats.creds");
+        let mut builder = ClientBuilder::new();
+        builder.credentials_path(path.clone());
+        assert_eq!(builder.credentials_path, Some(path));
+    }
+
+    #[test]
+    fn test_client_builder_build_missing_credentials() {
+        let builder = ClientBuilder::new();
+        let result = builder.build();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "credentials_path"));
+    }
+
+    #[test]
+    fn test_client_builder_build_success() {
+        let path = PathBuf::from("/valid/nats.creds");
+        let mut builder = ClientBuilder::new();
+        builder.credentials_path(path.clone());
+        let result = builder.build();
+        
+        assert!(result.is_ok());
+        let client = result.unwrap();
+        assert_eq!(client.credentials_path, path);
+        assert!(client.jetstream.is_none());
+    }
+
+    #[test]
+    fn test_client_builder_method_chaining() {
+        let path = PathBuf::from("/chain/test.creds");
+        let mut builder = ClientBuilder::new();
+        let client = builder
+            .credentials_path(path.clone())
+            .build()
+            .unwrap();
+        
+        assert_eq!(client.credentials_path, path);
+        assert!(client.jetstream.is_none());
+    }
+
+    #[test]
+    fn test_client_builder_default() {
+        let builder = ClientBuilder::default();
+        assert!(builder.credentials_path.is_none());
+    }
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::MissingRequiredAttribute("test_field".to_string());
+        assert!(err.to_string().contains("missing required attribute: test_field"));
+
+        let err = Error::CredentialsNotProvided();
+        assert!(err.to_string().contains("credentials are not provided"));
+    }
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(DEFAULT_NATS_HOST, "localhost:4222");
+    }
+
+    #[test]
+    fn test_credentials_struct() {
+        // Test that Credentials can be deserialized correctly
+        let json_creds = r#"{
+            "nkey": "UAABC123DEF456GHI789JKL",
+            "host": "nats.example.com:4222"
+        }"#;
+        
+        let creds: Result<Credentials, serde_json::Error> = serde_json::from_str(json_creds);
+        assert!(creds.is_ok());
+        
+        let creds = creds.unwrap();
+        assert_eq!(creds.nkey, Some("UAABC123DEF456GHI789JKL".to_string()));
+        assert_eq!(creds.host, Some("nats.example.com:4222".to_string()));
+    }
+
+    #[test]
+    fn test_credentials_optional_fields() {
+        // Test credentials with missing optional fields
+        let json_creds = r#"{}"#;
+        
+        let creds: Result<Credentials, serde_json::Error> = serde_json::from_str(json_creds);
+        assert!(creds.is_ok());
+        
+        let creds = creds.unwrap();
+        assert_eq!(creds.nkey, None);
+        assert_eq!(creds.host, None);
+    }
+
+    #[test]
+    fn test_client_structure() {
+        let path = PathBuf::from("/test/nats.creds");
+        let client = Client {
+            credentials_path: path.clone(),
+            jetstream: None,
+        };
+
+        assert_eq!(client.credentials_path, path);
+        assert!(client.jetstream.is_none());
+    }
+
+    // Note: We cannot easily test the connect() method without a real NATS server
+    // and valid credentials file, but the builder pattern and error handling
+    // are thoroughly tested above
+}

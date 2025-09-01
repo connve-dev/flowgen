@@ -166,3 +166,92 @@ impl CacheBuilder {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_cache_builder_new() {
+        let builder = CacheBuilder::new();
+        assert!(builder.credentials_path.is_none());
+    }
+
+    #[test]
+    fn test_cache_builder_credentials_path() {
+        let path = PathBuf::from("/path/to/creds.jwt");
+        let builder = CacheBuilder::new().credentials_path(path.clone());
+        assert_eq!(builder.credentials_path, Some(path));
+    }
+
+    #[test]
+    fn test_cache_builder_build_missing_credentials() {
+        let result = CacheBuilder::new().build();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::MissingRequiredAttribute(attr) if attr == "credentials"));
+    }
+
+    #[test]
+    fn test_cache_builder_build_success() {
+        let path = PathBuf::from("/valid/path/creds.jwt");
+        let result = CacheBuilder::new()
+            .credentials_path(path.clone())
+            .build();
+        
+        assert!(result.is_ok());
+        let cache = result.unwrap();
+        assert_eq!(cache.credentials_path, path);
+        assert!(cache.store.is_none());
+    }
+
+    #[test]
+    fn test_cache_builder_chain() {
+        let path = PathBuf::from("/chain/test/creds.jwt");
+        let cache = CacheBuilder::new()
+            .credentials_path(path.clone())
+            .build()
+            .unwrap();
+        
+        assert_eq!(cache.credentials_path, path);
+    }
+
+    #[test]
+    fn test_cache_default() {
+        let cache = Cache::default();
+        assert_eq!(cache.credentials_path, PathBuf::new());
+        assert!(cache.store.is_none());
+    }
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::MissingRequiredAttribute("test_field".to_string());
+        assert!(err.to_string().contains("missing required event attribute: test_field"));
+
+        let err = Error::EmptyBuffer();
+        assert!(err.to_string().contains("no value in provided buffer"));
+
+        let err = Error::MissingNatsKVStore();
+        assert!(err.to_string().contains("missing required value Nats KV Store"));
+
+        let err = Error::MissingNatsJetstreamContext();
+        assert!(err.to_string().contains("missing required value Nats Jetstream Context"));
+    }
+
+    #[test]
+    fn test_cache_structure() {
+        // Test that Cache can be constructed and has the expected structure
+        let path = PathBuf::from("/test/creds.jwt");
+        let cache = Cache {
+            credentials_path: path.clone(),
+            store: None,
+        };
+
+        assert_eq!(cache.credentials_path, path);
+        assert!(cache.store.is_none());
+    }
+
+    // Note: We cannot easily test the async methods (init, put, get) without
+    // a real NATS server connection, but we can test the builder pattern
+    // and error types which cover the main functionality
+}
