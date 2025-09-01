@@ -12,24 +12,24 @@ use tracing::{event, Level};
 /// Errors that can occur during NATS JetStream subscription operations.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// NATS client authentication or connection error.
+    /// Client authentication or connection error.
     #[error(transparent)]
-    NatsClient(#[from] crate::client::Error),
-    /// Error converting NATS message to flowgen event format.
+    Client(#[from] crate::client::Error),
+    /// Error converting message to flowgen event format.
     #[error(transparent)]
-    NatsJetStreamMessage(#[from] crate::jetstream::message::Error),
+    MessageConversion(#[from] crate::jetstream::message::Error),
     /// JetStream consumer operation error.
     #[error(transparent)]
-    NatsJetStreamConsumer(#[from] async_nats::jetstream::stream::ConsumerError),
+    Consumer(#[from] async_nats::jetstream::stream::ConsumerError),
     /// JetStream consumer stream error.
     #[error(transparent)]
-    NatsJetStream(#[from] async_nats::jetstream::consumer::StreamError),
+    ConsumerStream(#[from] async_nats::jetstream::consumer::StreamError),
     /// Failed to get JetStream stream.
     #[error(transparent)]
-    NatsJetStreamGetStream(#[from] async_nats::jetstream::context::GetStreamError),
+    GetStream(#[from] async_nats::jetstream::context::GetStreamError),
     /// Failed to get JetStream stream information.
     #[error(transparent)]
-    NatsJetStreamStreamInfo(#[from] async_nats::jetstream::stream::InfoError),
+    StreamInfo(#[from] async_nats::jetstream::stream::InfoError),
     /// Failed to retrieve consumer configuration information.
     #[error("Consumer configuration check failed.")]
     ConsumerInfoFailed,

@@ -21,12 +21,12 @@ const DEFAULT_NUM_REQUESTED: i32 = 1000;
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
-    /// Salesforce Pub/Sub context or gRPC communication error.
+    /// Pub/Sub context or gRPC communication error.
     #[error(transparent)]
-    SalesforcePubSub(#[from] super::context::Error),
-    /// Salesforce client authentication error.
+    PubSub(#[from] super::context::Error),
+    /// Client authentication error.
     #[error(transparent)]
-    SalesforceAuth(#[from] crate::client::Error),
+    Auth(#[from] crate::client::Error),
     /// Flowgen core event system error.
     #[error(transparent)]
     Event(#[from] flowgen_core::event::Error),
@@ -85,7 +85,7 @@ impl<T: Cache> EventHandler<T> {
                 topic_name: self.config.topic.name.clone(),
             })
             .await
-            .map_err(Error::SalesforcePubSub)?
+            .map_err(Error::PubSub)?
             .into_inner();
 
         // Get schema for message deserialization.
@@ -97,7 +97,7 @@ impl<T: Cache> EventHandler<T> {
                 schema_id: topic_info.schema_id,
             })
             .await
-            .map_err(Error::SalesforcePubSub)?
+            .map_err(Error::PubSub)?
             .into_inner();
 
         // Set batch size for event fetching.
@@ -143,7 +143,7 @@ impl<T: Cache> EventHandler<T> {
             .await
             .subscribe(fetch_request)
             .await
-            .map_err(Error::SalesforcePubSub)?
+            .map_err(Error::PubSub)?
             .into_inner();
 
         while let Some(event) = stream.next().await {
@@ -203,7 +203,7 @@ impl<T: Cache> EventHandler<T> {
                     }
                 }
                 Err(e) => {
-                    return Err(Error::SalesforcePubSub(super::context::Error::Tonic(
+                    return Err(Error::PubSub(super::context::Error::Tonic(
                         Box::new(e),
                     )));
                 }
@@ -257,16 +257,16 @@ impl<T: Cache> flowgen_core::task::runner::Runner for Subscriber<T> {
         let sfdc_client = crate::client::Builder::new()
             .credentials_path(self.config.credentials.clone().into())
             .build()
-            .map_err(Error::SalesforceAuth)?
+            .map_err(Error::Auth)?
             .connect()
             .await
-            .map_err(Error::SalesforceAuth)?;
+            .map_err(Error::Auth)?;
 
         // Create Pub/Sub context
         let pubsub = super::context::ContextBuilder::new(service)
             .with_client(sfdc_client)
             .build()
-            .map_err(Error::SalesforcePubSub)?;
+            .map_err(Error::PubSub)?;
         let pubsub = Arc::new(Mutex::new(pubsub));
 
         // Spawn TopicListener.

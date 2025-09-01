@@ -7,30 +7,30 @@ use std::path::PathBuf;
 /// Errors during NATS-based cache interaction.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// NATS client authentication or connection error (transparently wraps `crate::client::Error`).
+    /// Client authentication or connection error (transparently wraps `crate::client::Error`).
     #[error(transparent)]
-    NatsClientAuth(#[from] crate::client::Error),
-    /// NATS KV store entry access/processing error (transparently wraps `async_nats::jetstream::kv::EntryError`).
+    ClientAuth(#[from] crate::client::Error),
+    /// KV store entry access/processing error (transparently wraps `async_nats::jetstream::kv::EntryError`).
     #[error(transparent)]
-    NatsKVEntry(#[from] async_nats::jetstream::kv::EntryError),
-    /// NATS KV store `put` operation error (transparently wraps `async_nats::jetstream::kv::PutError`).
+    KVEntry(#[from] async_nats::jetstream::kv::EntryError),
+    /// KV store `put` operation error (transparently wraps `async_nats::jetstream::kv::PutError`).
     #[error(transparent)]
-    NatsKVPut(#[from] async_nats::jetstream::kv::PutError),
-    /// NATS KV bucket creation error (transparently wraps `async_nats::jetstream::context::CreateKeyValueError`).
+    KVPut(#[from] async_nats::jetstream::kv::PutError),
+    /// KV bucket creation error (transparently wraps `async_nats::jetstream::context::CreateKeyValueError`).
     #[error(transparent)]
-    NatsKVBucketCreate(#[from] async_nats::jetstream::context::CreateKeyValueError),
+    KVBucketCreate(#[from] async_nats::jetstream::context::CreateKeyValueError),
     /// Expected non-empty buffer from KV store was empty or missing.
     #[error("no value in provided buffer")]
     EmptyBuffer(),
-    /// NATS KV store not initialized or unexpectedly `None`.
-    #[error("missing required value Nats KV Store")]
-    MissingNatsKVStore(),
+    /// KV store not initialized or unexpectedly `None`.
+    #[error("missing required value KV Store")]
+    MissingKVStore(),
     /// Required configuration attribute missing. Contains attribute name.
     #[error("missing required event attribute: {}", _0)]
     MissingRequiredAttribute(String),
-    /// NATS JetStream context was missing or unavailable.
-    #[error("missing required value Nats Jetstream Context")]
-    MissingNatsJetstreamContext(),
+    /// JetStream context was missing or unavailable.
+    #[error("missing required value JetStream Context")]
+    MissingJetStreamContext(),
 }
 
 /// NATS JetStream Key-Value (KV) store cache.
@@ -61,14 +61,14 @@ impl flowgen_core::cache::Cache for Cache {
         let client = crate::client::ClientBuilder::new()
             .credentials_path(self.credentials_path.clone())
             .build()
-            .map_err(Error::NatsClientAuth)?
+            .map_err(Error::ClientAuth)?
             .connect()
             .await
-            .map_err(Error::NatsClientAuth)?;
+            .map_err(Error::ClientAuth)?;
 
         let jetstream = client
             .jetstream
-            .ok_or(Error::MissingNatsJetstreamContext())?;
+            .ok_or(Error::MissingJetStreamContext())?;
 
         // Get or create KV store.
         let store = match jetstream.get_key_value(bucket).await {
@@ -80,7 +80,7 @@ impl flowgen_core::cache::Cache for Cache {
                     ..Default::default()
                 })
                 .await
-                .map_err(Error::NatsKVBucketCreate)?,
+                .map_err(Error::KVBucketCreate)?,
         };
 
         self.store = Some(store);
@@ -96,8 +96,8 @@ impl flowgen_core::cache::Cache for Cache {
     /// # Errors
     /// If store is uninitialized or NATS `put` fails.
     async fn put(&self, key: &str, value: bytes::Bytes) -> Result<(), Self::Error> {
-        let store = self.store.as_ref().ok_or(Error::MissingNatsKVStore())?;
-        store.put(key, value).await.map_err(Error::NatsKVPut)?;
+        let store = self.store.as_ref().ok_or(Error::MissingKVStore())?;
+        store.put(key, value).await.map_err(Error::KVPut)?;
         Ok(())
     }
 
@@ -109,12 +109,12 @@ impl flowgen_core::cache::Cache for Cache {
     /// # Errors
     /// If store is uninitialized, NATS `get` fails, or key not found/value empty.
     async fn get(&self, key: &str) -> Result<bytes::Bytes, Self::Error> {
-        let store = self.store.as_ref().ok_or(Error::MissingNatsKVStore())?;
+        let store = self.store.as_ref().ok_or(Error::MissingKVStore())?;
         // Map Ok(None) (key not found/empty) from NATS to Error::EmptyBuffer.
         let bytes = store
             .get(key)
             .await
-            .map_err(Error::NatsKVEntry)?
+            .map_err(Error::KVEntry)?
             .ok_or(Error::EmptyBuffer())?;
         Ok(bytes)
     }
@@ -231,11 +231,11 @@ mod tests {
         let err = Error::EmptyBuffer();
         assert!(err.to_string().contains("no value in provided buffer"));
 
-        let err = Error::MissingNatsKVStore();
-        assert!(err.to_string().contains("missing required value Nats KV Store"));
+        let err = Error::MissingKVStore();
+        assert!(err.to_string().contains("missing required value KV Store"));
 
-        let err = Error::MissingNatsJetstreamContext();
-        assert!(err.to_string().contains("missing required value Nats Jetstream Context"));
+        let err = Error::MissingJetStreamContext();
+        assert!(err.to_string().contains("missing required value JetStream Context"));
     }
 
     #[test]

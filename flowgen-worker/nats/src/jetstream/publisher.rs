@@ -9,30 +9,30 @@ use tracing::{event, Level};
 /// Errors that can occur during NATS JetStream publishing operations.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// NATS client authentication or connection error.
+    /// Client authentication or connection error.
     #[error(transparent)]
-    NatsClientAuth(#[from] crate::client::Error),
+    ClientAuth(#[from] crate::client::Error),
     /// Failed to publish message to JetStream.
     #[error(transparent)]
-    NatsPublish(#[from] async_nats::jetstream::context::PublishError),
+    Publish(#[from] async_nats::jetstream::context::PublishError),
     /// Failed to create JetStream stream.
     #[error(transparent)]
-    NatsCreateStream(#[from] async_nats::jetstream::context::CreateStreamError),
+    CreateStream(#[from] async_nats::jetstream::context::CreateStreamError),
     /// Failed to get existing JetStream stream.
     #[error(transparent)]
-    NatsGetStream(#[from] async_nats::jetstream::context::GetStreamError),
+    GetStream(#[from] async_nats::jetstream::context::GetStreamError),
     /// Failed to make request to JetStream.
     #[error(transparent)]
-    NatsRequest(#[from] async_nats::jetstream::context::RequestError),
-    /// Error converting event to NATS message format.
+    Request(#[from] async_nats::jetstream::context::RequestError),
+    /// Error converting event to message format.
     #[error(transparent)]
-    NatsJetStreamEvent(#[from] super::message::Error),
+    MessageConversion(#[from] super::message::Error),
     /// Required event attribute is missing.
     #[error("missing required event attribute: {}", _0)]
     MissingRequiredAttribute(String),
-    /// NATS client was not properly initialized or is missing.
-    #[error("Nats client is missing / not initialized properly")]
-    MissingNatsClient(),
+    /// Client was not properly initialized or is missing.
+    #[error("Client is missing / not initialized properly")]
+    MissingClient(),
 }
 
 struct EventHandler {
@@ -187,10 +187,10 @@ mod tests {
             .to_string()
             .contains("missing required event attribute: test_field"));
 
-        let err = Error::MissingNatsClient();
+        let err = Error::MissingClient();
         assert!(err
             .to_string()
-            .contains("Nats client is missing / not initialized properly"));
+            .contains("Client is missing / not initialized properly"));
     }
 
     #[test]

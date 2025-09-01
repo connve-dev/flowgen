@@ -25,9 +25,9 @@ pub enum Error {
     /// Invalid URL format in credentials or configuration.
     #[error(transparent)]
     ParseUrl(#[from] url::ParseError),
-    /// Failed to establish connection to NATS server.
+    /// Failed to establish connection to server.
     #[error(transparent)]
-    NatsConnect(#[from] async_nats::ConnectError),
+    Connect(#[from] async_nats::ConnectError),
     /// Credentials file path was not provided during client creation.
     #[error("credentials are not provided")]
     CredentialsNotProvided(),
@@ -67,7 +67,7 @@ impl flowgen_core::client::Client for Client {
         let nats_client = connect_options
             .connect(host)
             .await
-            .map_err(Error::NatsConnect)?;
+            .map_err(Error::Connect)?;
 
         let jetstream = async_nats::jetstream::new(nats_client);
 

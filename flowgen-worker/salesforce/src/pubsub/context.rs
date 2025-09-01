@@ -7,7 +7,7 @@ use tokio_stream::StreamExt;
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
-    /// Salesforce client was not properly initialized or is missing.
+    /// Client was not properly initialized or is missing.
     #[error("client missing")]
     MissingClient(),
     /// OAuth2 token response is missing or unavailable.

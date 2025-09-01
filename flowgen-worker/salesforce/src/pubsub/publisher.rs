@@ -19,12 +19,12 @@ const DEFAULT_PUBSUB_PORT: &str = "443";
 /// Errors that can occur during Salesforce Pub/Sub publishing operations.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// Salesforce Pub/Sub context or gRPC communication error.
+    /// Pub/Sub context or gRPC communication error.
     #[error(transparent)]
-    SalesforcePubSub(#[from] super::context::Error),
-    /// Salesforce client authentication error.
+    PubSub(#[from] super::context::Error),
+    /// Client authentication error.
     #[error(transparent)]
-    SalesforceAuth(#[from] crate::client::Error),
+    Auth(#[from] crate::client::Error),
     /// Flowgen core serialization extension error.
     #[error(transparent)]
     SerdeExt(#[from] flowgen_core::serde::Error),
@@ -82,15 +82,15 @@ impl flowgen_core::task::runner::Runner for Publisher {
         let sfdc_client = crate::client::Builder::new()
             .credentials_path(a.to_path_buf())
             .build()
-            .map_err(Error::SalesforceAuth)?
+            .map_err(Error::Auth)?
             .connect()
             .await
-            .map_err(Error::SalesforceAuth)?;
+            .map_err(Error::Auth)?;
 
         let pubsub = super::context::ContextBuilder::new(service)
             .with_client(sfdc_client)
             .build()
-            .map_err(Error::SalesforcePubSub)?;
+            .map_err(Error::PubSub)?;
 
         let pubsub = Arc::new(Mutex::new(pubsub));
 
@@ -101,7 +101,7 @@ impl flowgen_core::task::runner::Runner for Publisher {
                 topic_name: self.config.topic.clone(),
             })
             .await
-            .map_err(Error::SalesforcePubSub)?
+            .map_err(Error::PubSub)?
             .into_inner();
 
         let schema_info = pubsub
@@ -111,7 +111,7 @@ impl flowgen_core::task::runner::Runner for Publisher {
                 schema_id: topic_info.schema_id,
             })
             .await
-            .map_err(Error::SalesforcePubSub)?
+            .map_err(Error::PubSub)?
             .into_inner();
 
         let pubsub = pubsub.clone();
@@ -159,7 +159,7 @@ impl flowgen_core::task::runner::Runner for Publisher {
                         ..Default::default()
                     })
                     .await
-                    .map_err(Error::SalesforcePubSub)?;
+                    .map_err(Error::PubSub)?;
 
                 // Generate event subject/
                 let topic = topic_info.topic_name.replace('/', ".").to_lowercase();
