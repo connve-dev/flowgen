@@ -2,12 +2,14 @@ name: Test-Build-Push
 
 on:
   push:
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
 jobs:
   test-rust-latest:
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     steps:
     - uses: actions/checkout@v4
       with:
@@ -29,6 +31,7 @@ jobs:
 
   test-rust-nightly:
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     continue-on-error: true
     steps:
     - uses: actions/checkout@v4
@@ -50,12 +53,11 @@ jobs:
         cargo fmt --all
 
   build-and-push:
-    needs: [test-rust-latest, test-rust-nightly]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
     - uses: actions/checkout@v4
       with:
