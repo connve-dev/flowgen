@@ -11,7 +11,7 @@ use tokio::{
     sync::broadcast::{Receiver, Sender},
     task::JoinHandle,
 };
-use tracing::error;
+use tracing::{error, Instrument};
 
 /// Default cache bucket name for flow caching.
 const DEFAULT_CACHE_NAME: &str = "flowgen_cache";
@@ -21,93 +21,38 @@ const DEFAULT_CACHE_NAME: &str = "flowgen_cache";
 #[non_exhaustive]
 pub enum Error {
     /// Error in convert processor task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    ConverProcessor {
-        #[source]
-        source: Box<flowgen_core::task::convert::processor::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    ConverProcessor(#[from] flowgen_core::convert::processor::Error),
     /// Error in Salesforce Pub/Sub subscriber task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    SalesforcePubSubSubscriber {
-        #[source]
-        source: Box<flowgen_salesforce::pubsub::subscriber::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    SalesforcePubSubSubscriber(#[from] flowgen_salesforce::pubsub::subscriber::Error),
     /// Error in Salesforce Pub/Sub publisher task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    SalesforcePubsubPublisher {
-        #[source]
-        source: Box<flowgen_salesforce::pubsub::publisher::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    SalesforcePubsubPublisher(#[from] flowgen_salesforce::pubsub::publisher::Error),
     /// Error in HTTP request processor task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    HttpRequestProcessor {
-        #[source]
-        source: Box<flowgen_http::request::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    HttpRequestProcessor(#[from] flowgen_http::request::Error),
     /// Error in HTTP webhook processor task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    HttpWebhookProcessor {
-        #[source]
-        source: Box<flowgen_http::webhook::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    HttpWebhookProcessor(#[from] flowgen_http::webhook::Error),
     /// Error in HTTP server task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    HttpServer {
-        #[source]
-        source: Box<flowgen_http::server::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    HttpServer(#[from] flowgen_http::server::Error),
     /// Error in NATS JetStream publisher task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    NatsJetStreamPublisher {
-        #[source]
-        source: Box<flowgen_nats::jetstream::publisher::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    NatsJetStreamPublisher(#[from] flowgen_nats::jetstream::publisher::Error),
     /// Error in NATS JetStream subscriber task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    NatsJetStreamSubscriber {
-        #[source]
-        source: Box<flowgen_nats::jetstream::subscriber::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    NatsJetStreamSubscriber(#[from] flowgen_nats::jetstream::subscriber::Error),
     /// Error in object store reader task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    ObjectStoreReader {
-        #[source]
-        source: Box<flowgen_object_store::reader::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    ObjectStoreReader(#[from] flowgen_object_store::reader::Error),
     /// Error in object store writer task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    ObjectStoreWriter {
-        #[source]
-        source: Box<flowgen_object_store::writer::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    ObjectStoreWriter(#[from] flowgen_object_store::writer::Error),
     /// Error in generate subscriber task.
-    #[error("Flow: {flow}, task_id: {task_id}, source: {source}")]
-    GenerateSubscriber {
-        #[source]
-        source: Box<flowgen_core::task::generate::subscriber::Error>,
-        flow: String,
-        task_id: usize,
-    },
+    #[error(transparent)]
+    GenerateSubscriber(#[from] flowgen_core::generate::subscriber::Error),
     /// Error in cache operations.
     #[error(transparent)]
     Cache(#[from] flowgen_nats::cache::Error),
@@ -127,6 +72,8 @@ pub struct Flow<'a> {
     pub task_list: Option<Vec<JoinHandle<Result<(), Error>>>>,
     /// Shared HTTP server for webhook tasks.
     http_server: Arc<flowgen_http::server::HttpServer>,
+    /// Optional host client for coordination.
+    host: Option<Arc<flowgen_core::task::context::HostClient>>,
 }
 
 impl Flow<'_> {
@@ -135,6 +82,7 @@ impl Flow<'_> {
     /// Creates a shared event channel, initializes a cache, and spawns
     /// each configured task as a separate tokio task. Tasks are connected
     /// via broadcast channels for event communication.
+    #[tracing::instrument(skip(self), fields(flow = %self.config.flow.name))]
     pub async fn run(mut self) -> Result<Self, Error> {
         let mut task_list: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
         let (tx, _): (Sender<Event>, Receiver<Event>) = tokio::sync::broadcast::channel(1000);
@@ -148,234 +96,213 @@ impl Flow<'_> {
             .map_err(Error::Cache)?;
         let cache = Arc::new(cache);
 
+        // Create task manager with host if available.
+        let mut task_manager = flowgen_core::task::manager::TaskManagerBuilder::new();
+        if let Some(ref host) = self.host {
+            task_manager = task_manager.host(host.client.clone());
+        }
+        let task_manager = Arc::new(task_manager.build().start().await);
+
+        // Create task context for execution.
+        let task_context = Arc::new(
+            flowgen_core::task::context::TaskContextBuilder::new()
+                .flow_name(self.config.flow.name.clone())
+                .flow_labels(self.config.flow.labels.clone())
+                .task_manager(task_manager)
+                .build()
+                .map_err(|e| Error::MissingRequiredAttribute(e.to_string()))?,
+        );
+
         for (i, task) in self.config.flow.tasks.iter().enumerate() {
             match task {
                 Task::convert(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
                     let tx = tx.clone();
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_core::task::convert::processor::ProcessorBuilder::new()
-                            .config(config)
-                            .receiver(rx)
-                            .sender(tx)
-                            .current_task_id(i)
-                            .build()
-                            .await
-                            .map_err(|e| Error::ConverProcessor {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::ConverProcessor {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
+                    let task_context = Arc::clone(&task_context);
+                    let span = tracing::Span::current();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(
+                        async move {
+                            flowgen_core::convert::processor::ProcessorBuilder::new()
+                                .config(config)
+                                .receiver(rx)
+                                .sender(tx)
+                                .current_task_id(i)
+                                .task_context(task_context)
+                                .build()
+                                .await?
+                                .run()
+                                .await?;
 
-                        Ok(())
-                    });
+                            Ok(())
+                        }
+                        .instrument(span),
+                    );
                     task_list.push(task);
                 }
                 Task::generate(config) => {
                     let config = Arc::new(config.to_owned());
                     let tx = tx.clone();
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_core::task::generate::subscriber::SubscriberBuilder::new()
-                            .config(config)
-                            .sender(tx)
-                            .current_task_id(i)
-                            .build()
-                            .await
-                            .map_err(|e| Error::GenerateSubscriber {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::GenerateSubscriber {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
-                        Ok(())
-                    });
+                    let cache = Arc::clone(&cache);
+                    let task_context = Arc::clone(&task_context);
+                    let span = tracing::Span::current();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(
+                        async move {
+                            flowgen_core::generate::subscriber::SubscriberBuilder::new()
+                                .config(config)
+                                .sender(tx)
+                                .cache(cache)
+                                .current_task_id(i)
+                                .task_context(task_context)
+                                .build()
+                                .await?
+                                .run()
+                                .await?;
+                            Ok(())
+                        }
+                        .instrument(span),
+                    );
                     task_list.push(task);
                 }
                 Task::http_request(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
                     let tx = tx.clone();
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_http::request::ProcessorBuilder::new()
-                            .config(config)
-                            .receiver(rx)
-                            .sender(tx)
-                            .current_task_id(i)
-                            .build()
-                            .await
-                            .map_err(|e| Error::HttpRequestProcessor {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::HttpRequestProcessor {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
+                    let task_context = Arc::clone(&task_context);
+                    let span = tracing::Span::current();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(
+                        async move {
+                            flowgen_http::request::ProcessorBuilder::new()
+                                .config(config)
+                                .receiver(rx)
+                                .sender(tx)
+                                .current_task_id(i)
+                                .task_context(task_context)
+                                .build()
+                                .await?
+                                .run()
+                                .await?;
 
-                        Ok(())
-                    });
+                            Ok(())
+                        }
+                        .instrument(span),
+                    );
                     task_list.push(task);
                 }
                 Task::http_webhook(config) => {
                     let config = Arc::new(config.to_owned());
                     let tx = tx.clone();
-                    let flow_config = Arc::clone(&self.config);
                     let http_server = Arc::clone(&self.http_server);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_http::webhook::ProcessorBuilder::new()
-                            .config(config)
-                            .sender(tx)
-                            .current_task_id(i)
-                            .http_server(http_server)
-                            .build()
-                            .await
-                            .map_err(|e| Error::HttpWebhookProcessor {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::HttpWebhookProcessor {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
+                    let task_context = Arc::clone(&task_context);
+                    let span = tracing::Span::current();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(
+                        async move {
+                            flowgen_http::webhook::ProcessorBuilder::new()
+                                .config(config)
+                                .sender(tx)
+                                .current_task_id(i)
+                                .http_server(http_server)
+                                .task_context(task_context)
+                                .build()
+                                .await?
+                                .run()
+                                .await?;
 
-                        Ok(())
-                    });
+                            Ok(())
+                        }
+                        .instrument(span),
+                    );
                     task_list.push(task);
                 }
 
                 Task::nats_jetstream_subscriber(config) => {
                     let config = Arc::new(config.to_owned());
                     let tx = tx.clone();
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_nats::jetstream::subscriber::SubscriberBuilder::new()
-                            .config(config)
-                            .sender(tx)
-                            .current_task_id(i)
-                            .build()
-                            .await
-                            .map_err(|e| Error::NatsJetStreamSubscriber {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::NatsJetStreamSubscriber {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
-                        Ok(())
-                    });
+                    let task_context = Arc::clone(&task_context);
+                    let span = tracing::Span::current();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(
+                        async move {
+                            flowgen_nats::jetstream::subscriber::SubscriberBuilder::new()
+                                .config(config)
+                                .sender(tx)
+                                .current_task_id(i)
+                                .task_context(task_context)
+                                .build()
+                                .await?
+                                .run()
+                                .await?;
+                            Ok(())
+                        }
+                        .instrument(span),
+                    );
                     task_list.push(task);
                 }
                 Task::nats_jetstream_publisher(config) => {
                     let config = Arc::new(config.to_owned());
-                    let flow_config = Arc::clone(&self.config);
                     let rx = tx.subscribe();
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_nats::jetstream::publisher::PublisherBuilder::new()
-                            .config(config)
-                            .receiver(rx)
-                            .current_task_id(i)
-                            .build()
-                            .await
-                            .map_err(|e| Error::NatsJetStreamPublisher {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::NatsJetStreamPublisher {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
-                        Ok(())
-                    });
+                    let task_context = Arc::clone(&task_context);
+                    let span = tracing::Span::current();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(
+                        async move {
+                            flowgen_nats::jetstream::publisher::PublisherBuilder::new()
+                                .config(config)
+                                .receiver(rx)
+                                .current_task_id(i)
+                                .task_context(task_context)
+                                .build()
+                                .await?
+                                .run()
+                                .await?;
+                            Ok(())
+                        }
+                        .instrument(span),
+                    );
                     task_list.push(task);
                 }
                 Task::salesforce_pubsub_subscriber(config) => {
                     let config = Arc::new(config.to_owned());
                     let tx = tx.clone();
                     let cache = Arc::clone(&cache);
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_salesforce::pubsub::subscriber::SubscriberBuilder::new()
-                            .config(config)
-                            .sender(tx)
-                            .current_task_id(i)
-                            .cache(cache)
-                            .build()
-                            .await
-                            .map_err(|e| Error::SalesforcePubSubSubscriber {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::SalesforcePubSubSubscriber {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
-                        Ok(())
-                    });
+                    let task_context = Arc::clone(&task_context);
+                    let span = tracing::Span::current();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(
+                        async move {
+                            flowgen_salesforce::pubsub::subscriber::SubscriberBuilder::new()
+                                .config(config)
+                                .sender(tx)
+                                .current_task_id(i)
+                                .cache(cache)
+                                .task_context(task_context)
+                                .build()
+                                .await?
+                                .run()
+                                .await?;
+                            Ok(())
+                        }
+                        .instrument(span),
+                    );
                     task_list.push(task);
                 }
                 Task::salesforce_pubsub_publisher(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_salesforce::pubsub::publisher::PublisherBuilder::new()
-                            .config(config)
-                            .receiver(rx)
-                            .current_task_id(i)
-                            .build()
-                            .await
-                            .map_err(|e| Error::SalesforcePubsubPublisher {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::SalesforcePubsubPublisher {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
-                        Ok(())
-                    });
+                    let task_context = Arc::clone(&task_context);
+                    let span = tracing::Span::current();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(
+                        async move {
+                            flowgen_salesforce::pubsub::publisher::PublisherBuilder::new()
+                                .config(config)
+                                .receiver(rx)
+                                .current_task_id(i)
+                                .task_context(task_context)
+                                .build()
+                                .await?
+                                .run()
+                                .await?;
+                            Ok(())
+                        }
+                        .instrument(span),
+                    );
                     task_list.push(task);
                 }
                 Task::object_store_reader(config) => {
@@ -383,57 +310,47 @@ impl Flow<'_> {
                     let rx = tx.subscribe();
                     let tx = tx.clone();
                     let cache = Arc::clone(&cache);
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_object_store::reader::ReaderBuilder::new()
-                            .config(config)
-                            .sender(tx)
-                            .receiver(rx)
-                            .cache(cache)
-                            .current_task_id(i)
-                            .build()
-                            .await
-                            .map_err(|e| Error::ObjectStoreReader {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::ObjectStoreReader {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
-                        Ok(())
-                    });
+                    let task_context = Arc::clone(&task_context);
+                    let span = tracing::Span::current().clone();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(
+                        async move {
+                            flowgen_object_store::reader::ReaderBuilder::new()
+                                .config(config)
+                                .sender(tx)
+                                .receiver(rx)
+                                .cache(cache)
+                                .current_task_id(i)
+                                .task_context(task_context)
+                                .build()
+                                .await?
+                                .run()
+                                .await?;
+                            Ok(())
+                        }
+                        .instrument(span),
+                    );
                     task_list.push(task);
                 }
                 Task::object_store_writer(config) => {
                     let config = Arc::new(config.to_owned());
                     let rx = tx.subscribe();
-                    let flow_config = Arc::clone(&self.config);
-                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                        flowgen_object_store::writer::WriterBuilder::new()
-                            .config(config)
-                            .receiver(rx)
-                            .current_task_id(i)
-                            .build()
-                            .await
-                            .map_err(|e| Error::ObjectStoreWriter {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?
-                            .run()
-                            .await
-                            .map_err(|e| Error::ObjectStoreWriter {
-                                source: Box::new(e),
-                                flow: flow_config.flow.name.to_owned(),
-                                task_id: i,
-                            })?;
-                        Ok(())
-                    });
+                    let task_context = Arc::clone(&task_context);
+                    let span = tracing::Span::current();
+                    let task: JoinHandle<Result<(), Error>> = tokio::spawn(
+                        async move {
+                            flowgen_object_store::writer::WriterBuilder::new()
+                                .config(config)
+                                .receiver(rx)
+                                .current_task_id(i)
+                                .task_context(task_context)
+                                .build()
+                                .await?
+                                .run()
+                                .await?;
+                            Ok(())
+                        }
+                        .instrument(span),
+                    );
                     task_list.push(task);
                 }
             }
@@ -453,6 +370,8 @@ pub struct FlowBuilder<'a> {
     cache_credentials_path: Option<&'a Path>,
     /// Optional shared HTTP server instance.
     http_server: Option<Arc<flowgen_http::server::HttpServer>>,
+    /// Optional host client for coordination.
+    host: Option<Arc<flowgen_core::task::context::HostClient>>,
 }
 
 impl<'a> FlowBuilder<'a> {
@@ -479,6 +398,12 @@ impl<'a> FlowBuilder<'a> {
         self
     }
 
+    /// Sets the host client for coordination.
+    pub fn host(mut self, client: Option<Arc<flowgen_core::task::context::HostClient>>) -> Self {
+        self.host = client;
+        self
+    }
+
     /// Builds a Flow instance from the configured options.
     ///
     /// # Errors
@@ -495,6 +420,7 @@ impl<'a> FlowBuilder<'a> {
             http_server: self
                 .http_server
                 .ok_or_else(|| Error::MissingRequiredAttribute("http_server".to_string()))?,
+            host: self.host,
         })
     }
 }
@@ -526,6 +452,7 @@ mod tests {
         let flow_config = Arc::new(FlowConfig {
             flow: Flow {
                 name: "test_flow".to_string(),
+                labels: None,
                 tasks: vec![],
             },
         });
@@ -569,6 +496,7 @@ mod tests {
         let flow_config = Arc::new(FlowConfig {
             flow: Flow {
                 name: "test_flow".to_string(),
+                labels: None,
                 tasks: vec![],
             },
         });
@@ -590,6 +518,7 @@ mod tests {
         let flow_config = Arc::new(FlowConfig {
             flow: Flow {
                 name: "test_flow".to_string(),
+                labels: None,
                 tasks: vec![],
             },
         });
@@ -611,6 +540,7 @@ mod tests {
         let flow_config = Arc::new(FlowConfig {
             flow: Flow {
                 name: "success_flow".to_string(),
+                labels: None,
                 tasks: vec![],
             },
         });
@@ -635,6 +565,7 @@ mod tests {
         let flow_config = Arc::new(FlowConfig {
             flow: Flow {
                 name: "chain_flow".to_string(),
+                labels: None,
                 tasks: vec![],
             },
         });
@@ -654,18 +585,12 @@ mod tests {
 
     #[test]
     fn test_error_convert_processor() {
-        let convert_error = flowgen_core::task::convert::processor::Error::MissingRequiredAttribute(
-            "test".to_string(),
-        );
-        let error = Error::ConverProcessor {
-            source: Box::new(convert_error),
-            flow: "test_flow".to_string(),
-            task_id: 0,
-        };
+        let convert_error =
+            flowgen_core::convert::processor::Error::MissingRequiredAttribute("test".to_string());
+        let error = Error::ConverProcessor(convert_error);
 
         let error_str = error.to_string();
-        assert!(error_str.contains("Flow: test_flow"));
-        assert!(error_str.contains("task_id: 0"));
+        assert!(error_str.contains("Missing required attribute: test"));
     }
 
     #[test]
